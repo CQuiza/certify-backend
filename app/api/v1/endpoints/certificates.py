@@ -179,6 +179,7 @@ async def create_certificate(
             admin=current,
             user_id=body.user_id,
             certificate_type_id=body.certificate_type_id,
+            issued_at=body.issued_at,
         )
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))

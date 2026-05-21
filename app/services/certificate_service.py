@@ -66,6 +66,7 @@ class CertificateService:
         admin: User,
         user_id: int,
         certificate_type_id: int,
+        issued_at: datetime | None = None,
     ):
         """Crea certificado; PDF/QR solo en MinIO; registra auditoría."""
         if admin.role not in (UserRole.superuser.value, UserRole.admin.value):
@@ -79,7 +80,14 @@ class CertificateService:
         if not student or student.role != UserRole.student.value:
             raise ValueError("El usuario destino debe ser estudiante")
 
-        issued_at = datetime.now(UTC)
+        if issued_at is not None:
+            # Si la fecha viene de la API sin zona horaria (naive), le asignamos UTC
+            if issued_at.tzinfo is None:
+                issued_at = issued_at.replace(tzinfo=UTC)
+        else:
+            # Si no se envía, se usa la fecha y hora actual del servidor por defecto
+            issued_at = datetime.now(UTC)
+
         expires_at = compute_certificate_expires_at(
             issued_at,
             ct.validity_type,
@@ -160,7 +168,9 @@ class CertificateService:
         await db.flush()
         return cert
 
-    async def _minio_apply_revoked_watermark(self, settings: Settings, uid: str) -> None:
+    async def _minio_apply_revoked_watermark(
+        self, settings: Settings, uid: str
+    ) -> None:
         def go() -> None:
             mc = get_minio_client(settings)
             key = _minio_object_key(settings.minio_path_pdf, f"{uid}.pdf")
@@ -182,7 +192,9 @@ class CertificateService:
         student = await user_repository.get_by_id(db, cert.user_id)
         ct = await certificate_type_repository.get_by_id(db, cert.certificate_type_id)
         if not student or not ct:
-            msg = "No se puede regenerar el PDF: falta estudiante o tipo de certificado."
+            msg = (
+                "No se puede regenerar el PDF: falta estudiante o tipo de certificado."
+            )
             raise ValueError(msg)
 
         issued_at = _issued_date(cert)

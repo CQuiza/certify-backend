@@ -23,6 +23,9 @@ class CertificateIssueRequest(BaseModel):
 
     user_id: int
     certificate_type_id: int
+    issued_at: datetime | None = Field(
+        default=None, description="Fecha personalizada de emisión del certificado"
+    )
 
 
 class CertificateUpdate(BaseModel):

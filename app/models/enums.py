@@ -45,3 +45,4 @@ class CertificateAuditAction(str, Enum):
     active = "active"
     revoked = "revoked"
     deleted = "deleted"
+    expired = "expired"

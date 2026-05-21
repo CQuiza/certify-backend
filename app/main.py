@@ -26,6 +26,57 @@ from app.models import (  # noqa: F401 — registra metadatos
 logger = logging.getLogger(__name__)
 
 
+async def create_database_if_not_exists() -> None:
+    """Crea la base de datos destino si no existe (solo para PostgreSQL)."""
+    import re
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    settings = get_settings()
+    db_url = settings.get_database_url()
+
+    if not (db_url.startswith("postgresql") or db_url.startswith("postgres")):
+        return
+
+    # Parsear URL para conectarnos a la base de datos predeterminada 'postgres'
+    match = re.match(r"^(postgresql(?:\+asyncpg)?://[^/]+/)([^?]+)(?:\?.*)?$", db_url)
+    if not match:
+        logger.warning("No se pudo parsear la URL de la base de datos para creación automática.")
+        return
+
+    base_url = match.group(1)
+    db_name = match.group(2)
+
+    postgres_url = f"{base_url}postgres"
+    if postgres_url.startswith("postgresql://"):
+        postgres_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif postgres_url.startswith("postgres://"):
+        postgres_url = postgres_url.replace("postgres://", "postgresql+asyncpg://", 1)
+
+    temp_engine = create_async_engine(postgres_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with temp_engine.connect() as conn:
+            cleaned_db_name = re.sub(r"[^a-zA-Z0-9_]", "", db_name)
+            if not cleaned_db_name:
+                raise ValueError("El nombre de la base de datos es inválido.")
+
+            result = await conn.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :dbname"),
+                {"dbname": cleaned_db_name}
+            )
+            exists = result.scalar()
+            if not exists:
+                logger.info("La base de datos '%s' no existe. Creando...", cleaned_db_name)
+                await conn.execute(text(f'CREATE DATABASE "{cleaned_db_name}"'))
+                logger.info("Base de datos '%s' creada exitosamente.", cleaned_db_name)
+            else:
+                logger.info("La base de datos '%s' ya existe.", cleaned_db_name)
+    except Exception as e:
+        logger.error("Error al verificar/crear la base de datos '%s': %s", db_name, e)
+    finally:
+        await temp_engine.dispose()
+
+
 async def _seed_superuser() -> None:
     """Crea el superusuario inicial si no existe."""
     settings = get_settings()
@@ -54,11 +105,13 @@ async def _seed_superuser() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    await create_database_if_not_exists()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _seed_superuser()
     yield
     await engine.dispose()
+
 
 
 settings = get_settings()

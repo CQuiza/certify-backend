@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.user_repository import user_repository
-from app.schemas.user import UserCreate, UserRead, UserUpdate
+from app.schemas.user import UserCreate, UserRead, UserUpdate, UserWithCertificatesRead
 from app.services.access import is_super_or_admin
 from app.services.user_service import user_service
 
@@ -30,7 +30,21 @@ async def list_users(
     return list(rows)
 
 
+@router.get("/certified", response_model=list[UserWithCertificatesRead])
+async def list_certified_students(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list[User]:
+    if not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
+    rows = await user_repository.list_certified_students(db, skip=skip, limit=limit)
+    return list(rows)
+
+
 @router.get("/{user_id}", response_model=UserRead)
+
 async def get_user(
     user_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],

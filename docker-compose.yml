@@ -7,6 +7,26 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app
+      - ./app:/src/app
+    env_file:
+      - .env
+
+  celery-worker:
+    build: .
+    command: celery -A app.workers.celery_config:celery_app worker --loglevel=info
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./app:/src/app
+    env_file:
+      - .env
+
+  celery-beat:
+    build: .
+    command: celery -A app.workers.celery_config:celery_app beat --loglevel=info
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./app:/src/app
     env_file:
       - .env

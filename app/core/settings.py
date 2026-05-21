@@ -1,5 +1,6 @@
 """Configuración de la aplicación con pydantic-settings."""
 
+from email.policy import default
 from functools import lru_cache
 from typing import Literal
 
@@ -73,6 +74,12 @@ class Settings(BaseSettings):
     minio_bucket: str = Field(default="certify", alias="MINIO_BUCKET")
     minio_path_pdf: str = Field(default="certifications/pdf", alias="MINIO_PATH_PDF")
     minio_path_qr: str = Field(default="certifications/qr", alias="MINIO_PATH_QR")
+    minio_path_backup_db: str = Field(
+        default="backup/database", alias="MINIO_PATH_BACKUP_DB"
+    )
+    minio_path_backup_cert: str = Field(
+        default="backup/certificates", alias="MINIO_PATH_BACKUP_CERT"
+    )
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_region: str = Field(default="", alias="MINIO_REGION")
 
@@ -107,6 +114,10 @@ class Settings(BaseSettings):
         default="system@certify.com", alias="SYSTEM_BOT_USER_EMAIL"
     )
     system_bot_user_id: int = Field(default=8, alias="SYSTEM_BOT_USER_ID")
+
+    rabbitmq_url: str = Field(
+        default="amqp://user:pass@host:5672//", alias="RABBITMQ_URL"
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod

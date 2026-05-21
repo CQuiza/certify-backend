@@ -84,8 +84,31 @@ class UserRepository:
         await db.refresh(user)
         return user
 
+    async def list_certified_students(
+        self,
+        db: AsyncSession,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> Sequence[User]:
+        from sqlalchemy.orm import selectinload
+        from app.models.certificate import Certificate
+
+        q = (
+            select(User)
+            .join(Certificate, User.id == Certificate.user_id)
+            .where(User.role == UserRole.student.value)
+            .distinct()
+            .options(selectinload(User.certificates))
+            .offset(skip)
+            .limit(limit)
+        )
+        r = await db.execute(q.order_by(User.id))
+        return r.scalars().all()
+
     async def delete(self, db: AsyncSession, user: User) -> None:
         await db.delete(user)
 
 
 user_repository = UserRepository()
+

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.enums import IdentityType, UserRole
 
+from app.schemas.certificate import CertificateRead
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -55,3 +56,10 @@ class UserRead(BaseModel):
     is_active: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+
+
+class UserWithCertificatesRead(UserRead):
+    certificates: list[CertificateRead] = []
+

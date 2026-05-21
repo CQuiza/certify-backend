@@ -30,8 +30,8 @@ _LAYOUT = {
     "legal_top_y": 188.0,
     "legal_max_width": 720.0,
     "legal_margin_x": 61.0,
-    "qr_from_right": 72.0,
-    "qr_from_bottom": 48.0,
+    "qr_from_right": 64.0,
+    "qr_from_bottom": 40.0,
     "qr_max_side": 120.0,
 }
 

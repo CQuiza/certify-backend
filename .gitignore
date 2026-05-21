@@ -178,3 +178,4 @@ pyrightconfig.json
 # IA
 skills-lock.json
 .agents/
+.antigravitycli
