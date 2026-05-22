@@ -109,6 +109,13 @@ class MinioClient:
             content_type=content_type,
         )
 
+    def remove_object(self, object_name: str) -> None:
+        """Elimina un objeto del bucket. No falla si el objeto no existe."""
+        try:
+            self.client.remove_object(self.bucket, object_name)
+        except Exception:
+            pass
+
 
 def get_minio_client(settings: Settings | None = None) -> MinioClient:
     return MinioClient(settings=settings)

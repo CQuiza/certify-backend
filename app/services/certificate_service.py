@@ -279,6 +279,24 @@ class CertificateService:
                 raise RuntimeError(msg) from exc
         return updated
 
+    async def _minio_delete_certificate_files(
+        self, settings: Settings, uid: str
+    ) -> None:
+        """Elimina el PDF y el QR del certificado del bucket MinIO.
+
+        Los objetos se identifican mediante ``minio_path_pdf/{uid}.pdf`` y
+        ``minio_path_qr/{uid}.png``. Si alguno de los dos no existe la
+        operación se ignora silenciosamente.
+        """
+        def go() -> None:
+            mc = get_minio_client(settings)
+            pdf_key = _minio_object_key(settings.minio_path_pdf, f"{uid}.pdf")
+            qr_key = _minio_object_key(settings.minio_path_qr, f"{uid}.png")
+            mc.remove_object(pdf_key)
+            mc.remove_object(qr_key)
+
+        await asyncio.to_thread(go)
+
     async def delete_certificate(
         self,
         db: AsyncSession,
@@ -286,7 +304,15 @@ class CertificateService:
         admin: User,
         cert: Certificate,
     ) -> None:
-        """Elimina el certificado tras registrar acción deleted en auditoría."""
+        """Elimina el certificado: archivos en MinIO, auditoría y registro en BD.
+
+        1. Borra el PDF y QR del bucket MinIO.
+        2. Registra la acción ``deleted`` en la tabla de auditoría.
+        3. Elimina el registro de la base de datos.
+        """
+        settings = get_settings()
+        _require_minio(settings)
+        await self._minio_delete_certificate_files(settings, str(cert.unique_id))
         db.add(
             CertificateAudit(
                 certificate_id=cert.id,
