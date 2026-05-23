@@ -46,3 +46,9 @@ class CertificateAuditAction(str, Enum):
     revoked = "revoked"
     deleted = "deleted"
     expired = "expired"
+
+
+class WorkerStatus(str, Enum):
+    running = "running"
+    success = "success"
+    failed = "failed"

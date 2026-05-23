@@ -312,7 +312,11 @@ class CertificateService:
         """
         settings = get_settings()
         _require_minio(settings)
-        await self._minio_delete_certificate_files(settings, str(cert.unique_id))
+        try:
+            await self._minio_delete_certificate_files(settings, str(cert.unique_id))
+        except Exception as exc:
+            msg = "No se pudieron eliminar los archivos del certificado en MinIO."
+            raise RuntimeError(msg) from exc
         db.add(
             CertificateAudit(
                 certificate_id=cert.id,

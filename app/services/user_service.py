@@ -1,11 +1,17 @@
 """Usuarios y credenciales."""
 
+import asyncio
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_password_hash, verify_password
 from app.models.user import User
 from app.repositories.user_repository import user_repository
 from app.schemas.user import UserCreate, UserUpdate
+from app.utils.email import send_credentials_email
+
+logger = logging.getLogger(__name__)
 
 
 class UserService:
@@ -18,11 +24,20 @@ class UserService:
         return user
 
     async def create_user(self, db: AsyncSession, data: UserCreate) -> User:
-        existing = await user_repository.get_by_email(db, data.email)
-        if existing:
+        existing_email = await user_repository.get_by_email(db, data.email)
+        if existing_email:
             raise ValueError("El correo ya está registrado")
+
+        existing_identity = await user_repository.get_by_identity_number(db, data.identity_number)
+        if existing_identity:
+            raise ValueError("El número de identidad ya está registrado")
+
+        existing_phone = await user_repository.get_by_phone_number(db, data.phone_number)
+        if existing_phone:
+            raise ValueError("El número de teléfono ya está registrado")
+
         hashed = get_password_hash(data.password)
-        return await user_repository.create(
+        user = await user_repository.create(
             db,
             email=data.email,
             password_hash=hashed,
@@ -35,9 +50,27 @@ class UserService:
             phone_number=data.phone_number,
             is_active=data.is_active,
         )
+        asyncio.create_task(send_credentials_email(data.email, data.password))
+        return user
 
     async def update_user(self, db: AsyncSession, user: User, data: UserUpdate) -> User:
         payload = data.model_dump(exclude_unset=True)
+
+        if "email" in payload and payload["email"] != user.email:
+            existing = await user_repository.get_by_email(db, payload["email"])
+            if existing:
+                raise ValueError("El correo ya está registrado")
+
+        if "identity_number" in payload and payload["identity_number"] != user.identity_number:
+            existing = await user_repository.get_by_identity_number(db, payload["identity_number"])
+            if existing:
+                raise ValueError("El número de identidad ya está registrado")
+
+        if "phone_number" in payload and payload["phone_number"] != user.phone_number:
+            existing = await user_repository.get_by_phone_number(db, payload["phone_number"])
+            if existing:
+                raise ValueError("El número de teléfono ya está registrado")
+
         if "password" in payload:
             payload["password_hash"] = get_password_hash(payload.pop("password"))
         if "role" in payload and payload["role"] is not None:

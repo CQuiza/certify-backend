@@ -3,9 +3,11 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.security import get_password_hash
@@ -21,6 +23,7 @@ from app.models import (  # noqa: F401 — registra metadatos
     Module,
     User,
     UserProgress,
+    WorkerAudit,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,6 +123,16 @@ app = FastAPI(
     title=settings.project_name,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(_request: Request, exc: IntegrityError) -> JSONResponse:
+    detail = str(exc.orig) if exc.orig else "Violación de restricción única"
+    logger.warning("IntegrityError: %s", detail)
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Ya existe un registro con ese valor"},
+    )
 
 app.add_middleware(
     CORSMiddleware,

@@ -233,4 +233,7 @@ async def delete_certificate(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Certificado no encontrado"
         )
-    await certificate_service.delete_certificate(db, admin=current, cert=cert)
+    try:
+        await certificate_service.delete_certificate(db, admin=current, cert=cert)
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))

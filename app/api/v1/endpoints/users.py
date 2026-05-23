@@ -23,10 +23,11 @@ async def list_users(
     current: Annotated[User, Depends(get_current_user)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    role: UserRole | None = None,
 ) -> list[User]:
     if not is_super_or_admin(current):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
-    rows = await user_repository.list(db, skip=skip, limit=limit)
+    rows = await user_repository.list(db, skip=skip, limit=limit, role=role)
     return list(rows)
 
 

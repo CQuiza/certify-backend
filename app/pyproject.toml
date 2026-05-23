@@ -22,4 +22,5 @@ dependencies = [
     "pillow>=12.2.0",
     "celery>=5.6.3",
     "amqp>=5.3.1",
+    "fastapi-mail>=1.6.4",
 ]

@@ -13,11 +13,13 @@ from app.models.enums import (
     IdentityType,
     UserRole,
     ValidityUnit,
+    WorkerStatus,
 )
 from app.models.lesson import Lesson
 from app.models.module import Module
 from app.models.progress import UserProgress
 from app.models.user import User
+from app.models.worker_audit import WorkerAudit
 
 __all__ = [
     "Base",
@@ -37,4 +39,6 @@ __all__ = [
     "UserProgress",
     "UserRole",
     "ValidityUnit",
+    "WorkerAudit",
+    "WorkerStatus",
 ]

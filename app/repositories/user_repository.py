@@ -18,6 +18,14 @@ class UserRepository:
         r = await db.execute(select(User).where(User.email == email))
         return r.scalar_one_or_none()
 
+    async def get_by_identity_number(self, db: AsyncSession, identity_number: str) -> User | None:
+        r = await db.execute(select(User).where(User.identity_number == identity_number))
+        return r.scalar_one_or_none()
+
+    async def get_by_phone_number(self, db: AsyncSession, phone_number: str) -> User | None:
+        r = await db.execute(select(User).where(User.phone_number == phone_number))
+        return r.scalar_one_or_none()
+
     async def list(
         self,
         db: AsyncSession,
