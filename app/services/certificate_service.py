@@ -115,7 +115,7 @@ class CertificateService:
         await db.flush()
         await db.refresh(cert)
 
-        verify_url = f"{base}/verify/{uid}"
+        verify_url = f"{base}/view/{uid}"
         box = max(4, min(14, settings.qr_size // 20))
         qr_io = MakeQRCode(box_size=box).to_bytesio(verify_url)
 
@@ -200,7 +200,7 @@ class CertificateService:
         issued_at = _issued_date(cert)
         uid = str(cert.unique_id)
         base = settings.base_url.rstrip("/")
-        verify_url = f"{base}/verify/{uid}"
+        verify_url = f"{base}/view/{uid}"
         box = max(4, min(14, settings.qr_size // 20))
         qr_io = MakeQRCode(box_size=box).to_bytesio(verify_url)
         tpl = _resolve_under_app(settings.certificate_template_pdf)
