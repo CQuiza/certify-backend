@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_current_user
+from app.api.v1.dependencies import get_current_user, get_optional_user
 from app.core.database import get_db
 from app.models.user import User
 from app.repositories.certificate_type_repository import certificate_type_repository
@@ -22,12 +22,10 @@ router = APIRouter(prefix="/certificate-types", tags=["certificate-types"])
 @router.get("", response_model=list[CertificateTypeRead])
 async def list_certificate_types(
     db: Annotated[AsyncSession, Depends(get_db)],
-    current: Annotated[User, Depends(get_current_user)],
+    optional_user: Annotated[User | None, Depends(get_optional_user)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> list:
-    if not is_super_or_admin(current):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
     rows = await certificate_type_repository.list(db, skip=skip, limit=limit)
     return list(rows)
 

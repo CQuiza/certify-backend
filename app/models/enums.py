@@ -52,3 +52,9 @@ class WorkerStatus(str, Enum):
     running = "running"
     success = "success"
     failed = "failed"
+
+
+class EmailStatus(str, Enum):
+    pending = "pending"
+    sent = "sent"
+    failed = "failed"

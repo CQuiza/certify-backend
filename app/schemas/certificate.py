@@ -50,3 +50,9 @@ class CertificateRead(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CertificateSearchResult(BaseModel):
+    user_name: str | None = None
+    identity_number: str | None = None
+    certificates: list[CertificateRead]

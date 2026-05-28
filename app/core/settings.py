@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     minio_path_backup_cert: str = Field(
         default="backup/certificates", alias="MINIO_PATH_BACKUP_CERT"
     )
+    minio_path_tasks: str = Field(
+        default="tasks/files", alias="MINIO_PATH_TASKS"
+    )
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_region: str = Field(default="", alias="MINIO_REGION")
 
@@ -113,7 +116,16 @@ class Settings(BaseSettings):
     system_bot_user_email: str = Field(
         default="system@certify.com", alias="SYSTEM_BOT_USER_EMAIL"
     )
-    system_bot_user_id: int = Field(default=8, alias="SYSTEM_BOT_USER_ID")
+    system_bot_user_name: str = Field(
+        default="System", alias="SYSTEM_BOT_USER_NAME"
+    )
+    system_bot_user_first_last_name: str = Field(
+        default="Bot", alias="SYSTEM_BOT_USER_FIRST_LAST_NAME"
+    )
+
+    task_max_upload_size_mb: int = Field(
+        default=50, alias="TASK_MAX_UPLOAD_SIZE_MB"
+    )
 
     rabbitmq_url: str = Field(
         default="amqp://user:pass@host:5672//", alias="RABBITMQ_URL"

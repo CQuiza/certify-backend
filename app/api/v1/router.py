@@ -9,11 +9,15 @@ from app.api.v1.endpoints import (
     certificates,
     course_enrollments,
     courses,
+    email_audit,
     health,
     lessons,
     modules,
+    tasks,
+    user_audit,
     user_progress,
     users,
+    worker_audit,
 )
 
 api_router = APIRouter()
@@ -29,3 +33,7 @@ api_router.include_router(certificate_types.router)
 api_router.include_router(certificates.router)
 api_router.include_router(certificate_audit.router)
 api_router.include_router(course_enrollments.router)
+api_router.include_router(email_audit.router)
+api_router.include_router(tasks.router)
+api_router.include_router(user_audit.router)
+api_router.include_router(worker_audit.router)

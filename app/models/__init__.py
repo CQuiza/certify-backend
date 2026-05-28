@@ -5,6 +5,7 @@ from app.models.certificate import Certificate
 from app.models.certificate_audit import CertificateAudit
 from app.models.certificate_type import CertificateType
 from app.models.course import Course, CourseEnrollment
+from app.models.email_audit import EmailAudit
 from app.models.enums import (
     CertificateAuditAction,
     CertificateStatus,
@@ -19,6 +20,7 @@ from app.models.lesson import Lesson
 from app.models.module import Module
 from app.models.progress import UserProgress
 from app.models.user import User
+from app.models.user_audit import UserAudit
 from app.models.worker_audit import WorkerAudit
 
 __all__ = [
@@ -32,10 +34,12 @@ __all__ = [
     "Course",
     "CourseEnrollment",
     "CourseStatus",
+    "EmailAudit",
     "IdentityType",
     "Lesson",
     "Module",
     "User",
+    "UserAudit",
     "UserProgress",
     "UserRole",
     "ValidityUnit",

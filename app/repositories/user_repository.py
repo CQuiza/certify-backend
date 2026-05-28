@@ -33,10 +33,13 @@ class UserRepository:
         skip: int = 0,
         limit: int = 100,
         role: UserRole | None = None,
+        exclude_superuser: bool = False,
     ) -> Sequence[User]:
         q = select(User).offset(skip).limit(limit)
         if role is not None:
             q = q.where(User.role == role.value)
+        if exclude_superuser:
+            q = q.where(User.role != UserRole.superuser.value)
         r = await db.execute(q.order_by(User.id))
         return r.scalars().all()
 

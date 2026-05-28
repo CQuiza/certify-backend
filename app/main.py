@@ -1,6 +1,7 @@
 """Aplicación FastAPI."""
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -26,6 +27,11 @@ from app.models import (  # noqa: F401 — registra metadatos
     WorkerAudit,
 )
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -106,12 +112,39 @@ async def _seed_superuser() -> None:
         logger.info("Superusuario '%s' creado.", settings.superuser_email)
 
 
+async def _seed_system_bot() -> None:
+    """Crea el usuario system bot si no existe."""
+    settings = get_settings()
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User).where(User.email == settings.system_bot_user_email)
+        )
+        if result.scalar_one_or_none() is not None:
+            return
+
+        bot = User(
+            email=settings.system_bot_user_email,
+            password_hash=get_password_hash(secrets.token_urlsafe(32)),
+            name=settings.system_bot_user_name,
+            first_last_name=settings.system_bot_user_first_last_name,
+            role="superuser",
+            identity_type="OTHER",
+            identity_number=f"BOT-{settings.system_bot_user_email}",
+            phone_number=f"+000{abs(hash(settings.system_bot_user_email)) % 10_000_000_000:010d}",
+            is_active=True,
+        )
+        session.add(bot)
+        await session.commit()
+        logger.info("System bot '%s' creado.", settings.system_bot_user_email)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await create_database_if_not_exists()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _seed_superuser()
+    await _seed_system_bot()
     yield
     await engine.dispose()
 
@@ -140,6 +173,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)

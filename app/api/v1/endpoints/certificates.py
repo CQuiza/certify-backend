@@ -1,10 +1,11 @@
 """Certificados emitidos."""
 
 import asyncio
+import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from minio.error import S3Error
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,21 +13,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
 from app.core.settings import get_settings
-from app.models.enums import UserRole
+from app.models.enums import CertificateStatus, UserRole
 from app.models.user import User
 from app.repositories.certificate_repository import certificate_repository
+from app.repositories.user_repository import user_repository
 from app.schemas.certificate import (
     CertificateIssueRequest,
     CertificateRead,
+    CertificateSearchResult,
     CertificateUpdate,
 )
 from app.services.access import is_super_or_admin
-from app.services.certificate_service import (
-    _minio_object_key,
-    _require_minio,
-    certificate_service,
-)
+from app.services.certificate_lifecycle import certificate_lifecycle
 from app.utils.minio_client import get_minio_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/certificates", tags=["certificates"])
 
@@ -62,15 +63,15 @@ async def list_certificates(
 @router.get("/view/{certificate_uuid}")
 async def view_certificate_pdf_public(certificate_uuid: UUID) -> Response:
     """Sirve el PDF desde MinIO para visualización en el front (público, solo UUID)."""
+    logger.info("Solicitando PDF público — uuid=%s", certificate_uuid)
     settings = get_settings()
-    try:
-        _require_minio(settings)
-    except RuntimeError:
+    if not (settings.minio_access_key and settings.minio_secret_key):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Almacenamiento de certificados no configurado.",
         )
-    key = _minio_object_key(settings.minio_path_pdf, f"{certificate_uuid}.pdf")
+    prefix = settings.minio_path_pdf.strip().strip("/")
+    key = f"{prefix}/{certificate_uuid}.pdf" if prefix else f"{certificate_uuid}.pdf"
 
     def load() -> bytes:
         return get_minio_client(settings).download_bytes(key)
@@ -80,19 +81,23 @@ async def view_certificate_pdf_public(certificate_uuid: UUID) -> Response:
     except S3Error as e:
         code = str(getattr(e, "code", "") or "").lower()
         if code in ("nosuchkey", "notfound"):
+            logger.warning("PDF no encontrado — uuid=%s", certificate_uuid)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Certificado no encontrado",
             )
+        logger.error("S3Error al servir PDF — uuid=%s: %s", certificate_uuid, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(e),
         )
     except Exception as e:
+        logger.error("Error al servir PDF — uuid=%s: %s", certificate_uuid, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(e),
         )
+    logger.info("PDF servido — uuid=%s, size=%s", certificate_uuid, len(data))
     return Response(
         content=data,
         media_type="application/pdf",
@@ -105,15 +110,15 @@ async def view_certificate_pdf_public(certificate_uuid: UUID) -> Response:
 @router.get("/view/{certificate_uuid}/qr")
 async def view_certificate_qr_public(certificate_uuid: UUID) -> Response:
     """Sirve el PNG del QR desde MinIO (público)."""
+    logger.info("Solicitando QR público — uuid=%s", certificate_uuid)
     settings = get_settings()
-    try:
-        _require_minio(settings)
-    except RuntimeError:
+    if not (settings.minio_access_key and settings.minio_secret_key):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Almacenamiento de certificados no configurado.",
         )
-    key = _minio_object_key(settings.minio_path_qr, f"{certificate_uuid}.png")
+    prefix = settings.minio_path_qr.strip().strip("/")
+    key = f"{prefix}/{certificate_uuid}.png" if prefix else f"{certificate_uuid}.png"
 
     def load() -> bytes:
         return get_minio_client(settings).download_bytes(key)
@@ -123,24 +128,28 @@ async def view_certificate_qr_public(certificate_uuid: UUID) -> Response:
     except S3Error as e:
         code = str(getattr(e, "code", "") or "").lower()
         if code in ("nosuchkey", "notfound"):
+            logger.warning("QR no encontrado — uuid=%s", certificate_uuid)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Código QR no encontrado",
             )
+        logger.error("S3Error al servir QR — uuid=%s: %s", certificate_uuid, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(e),
         )
     except Exception as e:
+        logger.error("Error al servir QR — uuid=%s: %s", certificate_uuid, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(e),
         )
+    logger.info("QR servido — uuid=%s", certificate_uuid)
     return Response(
         content=data,
         media_type="image/png",
         headers={
-            "Content-Disposition": f'inline; filename="{certificate_uuid}.png"',
+            "Cache-Control": "public, max-age=86400",
         },
     )
 
@@ -172,14 +181,16 @@ async def create_certificate(
     body: CertificateIssueRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
+    background_tasks: BackgroundTasks,
 ) -> object:
     try:
-        return await certificate_service.issue_certificate(
+        return await certificate_lifecycle.issue_certificate(
             db,
             admin=current,
             user_id=body.user_id,
             certificate_type_id=body.certificate_type_id,
             issued_at=body.issued_at,
+            background_tasks=background_tasks,
         )
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
@@ -206,12 +217,22 @@ async def update_certificate(
             status_code=status.HTTP_404_NOT_FOUND, detail="Certificado no encontrado"
         )
     payload = body.model_dump(exclude_unset=True)
-    if "status" in payload and payload["status"] is not None:
-        payload["status"] = payload["status"].value
+    new_status = payload.pop("status", None)
+
     try:
-        return await certificate_service.apply_certificate_update(
-            db, admin=current, cert=cert, fields=payload
-        )
+        if new_status == CertificateStatus.revoked:
+            return await certificate_lifecycle.revoke_certificate(
+                db, admin=current, cert=cert
+            )
+        elif new_status == CertificateStatus.active:
+            return await certificate_lifecycle.activate_certificate(
+                db, admin=current, cert=cert
+            )
+        elif payload:
+            return await certificate_lifecycle.update_certificate_fields(
+                db, admin=current, cert=cert, fields=payload
+            )
+        return cert
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except RuntimeError as e:
@@ -234,6 +255,39 @@ async def delete_certificate(
             status_code=status.HTTP_404_NOT_FOUND, detail="Certificado no encontrado"
         )
     try:
-        await certificate_service.delete_certificate(db, admin=current, cert=cert)
+        await certificate_lifecycle.delete_certificate(db, admin=current, cert=cert)
     except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+
+@router.get("/search-by-identity/{identity_number}", response_model=list[CertificateSearchResult])
+async def search_certificates_by_identity(
+    identity_number: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict]:
+    """Público: busca certificados por número de identidad del estudiante."""
+    user = await user_repository.get_by_identity_number(db, identity_number)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se encontraron certificados para esta identidad")
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
+    from app.models.certificate import Certificate
+    stmt = (
+        select(Certificate)
+        .where(
+            Certificate.user_id == user.id,
+            Certificate.status.in_([CertificateStatus.active.value, CertificateStatus.expired.value]),
+        )
+        .order_by(Certificate.issued_at.desc())
+    )
+    result = await db.execute(stmt)
+    certs = result.scalars().all()
+    if not certs:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se encontraron certificados para esta identidad")
+    return [
+        {
+            "user_name": user.name,
+            "identity_number": user.identity_number,
+            "certificates": certs,
+        }
+    ]

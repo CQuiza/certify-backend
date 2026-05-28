@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.lesson_task import LessonTask
     from app.models.module import Module
     from app.models.progress import UserProgress
 
@@ -32,4 +33,10 @@ class Lesson(Base):
         "UserProgress",
         back_populates="lesson",
         cascade="all, delete-orphan",
+    )
+    tasks: Mapped[list[LessonTask]] = relationship(
+        "LessonTask",
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+        order_by="LessonTask.order_index",
     )

@@ -3,21 +3,29 @@ Ejecuta las tareas diarias de expiración de certificados y backups de base de d
 """
 
 import asyncio
+import logging
 import os
 import subprocess
 from datetime import datetime, timezone
 
 from celery import shared_task
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
 from app.core.settings import get_settings
 from app.models.certificate import Certificate
 from app.models.certificate_audit import CertificateAudit
-from app.models.enums import CertificateStatus, CertificateAuditAction, WorkerStatus
+from app.models.email_audit import EmailAudit
+from app.models.enums import CertificateStatus, CertificateAuditAction, EmailStatus, WorkerStatus
+from app.repositories.user_repository import user_repository
+from app.services.certificate_storage import CertificateStorageService
 from app.utils.certificate_editor import apply_revoked_watermark_pdf
 from app.utils.minio_client import get_minio_client
+from app.utils.email import send_certificate_expired_email
 from app.utils.worker_audit import log_worker_action
+
+logger = logging.getLogger(__name__)
 
 @shared_task(name="app.workers.tasks.check_expired_certificates")
 def check_expired_certificates():
@@ -41,7 +49,9 @@ async def _async_check_expired_certificates():
             started_at=started_at,
         )
 
-        stmt = select(Certificate).where(
+        stmt = select(Certificate).options(
+            selectinload(Certificate.user)
+        ).where(
             Certificate.status == CertificateStatus.active.value,
             Certificate.expires_at <= now
         )
@@ -57,26 +67,17 @@ async def _async_check_expired_certificates():
             await session.commit()
             return
 
-        minio_client = get_minio_client(settings)
-        minio_client.ensure_bucket()
-
-        system_bot_id = settings.system_bot_user_id
+        storage = CertificateStorageService(settings)
+        system_user = await user_repository.get_by_email(session, settings.system_bot_user_email)
+        system_bot_id = system_user.id if system_user else None
 
         for cert in certificates:
             uid_str = str(cert.unique_id)
-            pdf_key = f"{settings.minio_path_pdf.strip('/')}/{uid_str}.pdf"
 
             try:
-                raw_pdf = await asyncio.to_thread(minio_client.download_bytes, pdf_key)
-
+                raw_pdf = await storage.download_pdf(uid_str)
                 watermarked_pdf = apply_revoked_watermark_pdf(raw_pdf, watermark_text="EXPIRADO")
-
-                await asyncio.to_thread(
-                    minio_client.upload_bytes,
-                    pdf_key,
-                    watermarked_pdf,
-                    content_type="application/pdf"
-                )
+                await storage.upload_pdf(uid_str, watermarked_pdf)
             except Exception as e:
                 errors.append(f"Certificado {cert.id}: {e}")
                 continue
@@ -90,6 +91,29 @@ async def _async_check_expired_certificates():
                 performed_by=system_bot_id,
             )
             session.add(audit)
+
+            student_user = cert.user
+            if student_user and student_user.email:
+                email_audit = EmailAudit(
+                    user_name=student_user.name,
+                    email_to=student_user.email,
+                    email_type="certificate_expired",
+                )
+                session.add(email_audit)
+                await session.flush()
+                try:
+                    await send_certificate_expired_email(
+                        email_to=student_user.email,
+                        student_name=student_user.name or "Estudiante",
+                        certificate_uid=uid_str,
+                    )
+                    email_audit.status = EmailStatus.sent.value
+                    email_audit.sent_at = func.now()
+                except Exception as e:
+                    email_audit.status = EmailStatus.failed.value
+                    email_audit.error = str(e)
+                    logger.exception("Error enviando correo de expiración a %s", student_user.email)
+
             processed += 1
 
         await session.flush()
@@ -119,6 +143,8 @@ async def _async_backup_database_to_minio():
     settings = get_settings()
     started_at = datetime.now(timezone.utc)
     task_name = "backup_database_to_minio"
+    status = WorkerStatus.running.value
+    details: str | None = None
 
     host = settings.postgres_host
     port = settings.postgres_port
@@ -144,58 +170,62 @@ async def _async_backup_database_to_minio():
         "-f", filepath,
     ]
 
-    async with AsyncSessionLocal() as session:
-        await log_worker_action(
-            session, task_name=task_name, status=WorkerStatus.running.value,
-            started_at=started_at,
-        )
-        await session.commit()
-
     try:
-        subprocess.run(cmd, env=env, check=True, capture_output=True)
-
-        minio_client = get_minio_client(settings)
-        minio_client.ensure_bucket()
-
-        object_name = f"{settings.minio_path_backup_db.strip('/')}/{filename}"
-
-        minio_client.client.fput_object(
-            minio_client.bucket,
-            object_name,
-            filepath,
-        )
-
-        file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
-
         async with AsyncSessionLocal() as session:
+            try:
+                await log_worker_action(
+                    session, task_name=task_name, status=WorkerStatus.running.value,
+                    started_at=started_at,
+                )
+                await session.flush()
+
+                logger.info("Iniciando pg_dump para backup %s", filename)
+                subprocess.run(cmd, env=env, check=True, capture_output=True)
+                logger.info("pg_dump completado para %s", filename)
+
+                minio_client = get_minio_client(settings)
+                minio_client.ensure_bucket()
+
+                object_name = f"{settings.minio_path_backup_db.strip('/')}/{filename}"
+
+                minio_client.client.fput_object(
+                    minio_client.bucket,
+                    object_name,
+                    filepath,
+                    metadata={
+                        "backup_created_at": started_at.isoformat(),
+                        "backup_filename": filename,
+                    },
+                )
+
+                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+
+                status = WorkerStatus.success.value
+                details = f"Backup {filename} subido a MinIO ({file_size} bytes)"
+                logger.info(details)
+
+            except subprocess.CalledProcessError as e:
+                detail_str = e.stderr.decode("utf-8", errors="replace")
+                status = WorkerStatus.failed.value
+                details = f"pg_dump falló: {detail_str}"
+                logger.error(details)
+
+            except Exception as e:
+                status = WorkerStatus.failed.value
+                details = f"Error en backup: {e}"
+                logger.exception(details)
+
             await log_worker_action(
-                session, task_name=task_name, status=WorkerStatus.success.value,
+                session, task_name=task_name, status=status,
                 started_at=started_at, finished_at=datetime.now(timezone.utc),
-                details=f"Backup {filename} subido a MinIO ({file_size} bytes)",
+                details=details,
             )
             await session.commit()
-
-    except subprocess.CalledProcessError as e:
-        detail = e.stderr.decode("utf-8", errors="replace")
-        async with AsyncSessionLocal() as session:
-            await log_worker_action(
-                session, task_name=task_name, status=WorkerStatus.failed.value,
-                started_at=started_at, finished_at=datetime.now(timezone.utc),
-                details=f"pg_dump falló: {detail}",
-            )
-            await session.commit()
-        raise e
-
-    except Exception as e:
-        async with AsyncSessionLocal() as session:
-            await log_worker_action(
-                session, task_name=task_name, status=WorkerStatus.failed.value,
-                started_at=started_at, finished_at=datetime.now(timezone.utc),
-                details=f"Error en backup: {e}",
-            )
-            await session.commit()
-        raise
 
     finally:
         if os.path.exists(filepath):
             os.remove(filepath)
+            logger.debug("Archivo temporal %s eliminado", filepath)
+
+    if status == WorkerStatus.failed.value:
+        logger.error("Backup falló: %s", details)
