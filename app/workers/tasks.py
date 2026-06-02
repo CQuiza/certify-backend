@@ -2,18 +2,19 @@
 Ejecuta las tareas diarias de expiración de certificados y backups de base de datos.
 """
 
-import asyncio
+import anyio
 import logging
 import os
 import subprocess
 from datetime import datetime, timezone
 
 from celery import shared_task
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
 from app.core.settings import get_settings
+from app.models import LessonTask  # noqa: F401 — asegura registro del mapper
 from app.models.certificate import Certificate
 from app.models.certificate_audit import CertificateAudit
 from app.models.email_audit import EmailAudit
@@ -32,7 +33,7 @@ def check_expired_certificates():
     """
     Revisa certificados expirados, aplica marca de agua y actualiza la BD.
     """
-    asyncio.run(_async_check_expired_certificates())
+    anyio.run(_async_check_expired_certificates)
 
 
 async def _async_check_expired_certificates():
@@ -136,7 +137,7 @@ def backup_database_to_minio():
     """
     Realiza un backup de la base de datos usando pg_dump y lo sube a MinIO.
     """
-    asyncio.run(_async_backup_database_to_minio())
+    anyio.run(_async_backup_database_to_minio)
 
 
 async def _async_backup_database_to_minio():

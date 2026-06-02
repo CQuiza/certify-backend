@@ -7,8 +7,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from app.core.rate_limit import limiter
 
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.security import get_password_hash
@@ -21,6 +25,7 @@ from app.models import (  # noqa: F401 — registra metadatos
     Course,
     CourseEnrollment,
     Lesson,
+    LessonTask,
     Module,
     User,
     UserProgress,
@@ -157,6 +162,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
+
 
 @app.exception_handler(IntegrityError)
 async def integrity_error_handler(_request: Request, exc: IntegrityError) -> JSONResponse:
@@ -168,13 +176,28 @@ async def integrity_error_handler(_request: Request, exc: IntegrityError) -> JSO
     )
 
 app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.allowed_hosts,
+)
+
+app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "0"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 

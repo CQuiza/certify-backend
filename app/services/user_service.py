@@ -1,6 +1,7 @@
 """Usuarios y credenciales."""
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,9 @@ from app.utils.email import send_credentials_with_audit
 
 logger = logging.getLogger(__name__)
 
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+
 
 class UserService:
     async def authenticate(self, db: AsyncSession, email: str, password: str) -> User | None:
@@ -21,9 +25,25 @@ class UserService:
         if not user or not user.is_active:
             logger.warning("Auth fallida — email=%s: usuario no encontrado o inactivo", email)
             return None
-        if not verify_password(password, user.password_hash):
-            logger.warning("Auth fallida — email=%s: contraseña incorrecta", email)
+
+        if user.locked_until and user.locked_until > datetime.now(UTC):
+            logger.warning("Auth bloqueada — email=%s: cuenta bloqueada hasta %s", email, user.locked_until)
             return None
+
+        if not verify_password(password, user.password_hash):
+            user.failed_login_attempts += 1
+            if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
+                user.locked_until = datetime.now(UTC) + timedelta(minutes=LOCKOUT_MINUTES)
+                logger.warning("Cuenta bloqueada — email=%s: %s intentos fallidos", email, user.failed_login_attempts)
+            db.add(user)
+            await db.flush()
+            logger.warning("Auth fallida — email=%s: contraseña incorrecta (intento %s)", email, user.failed_login_attempts)
+            return None
+
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        db.add(user)
+        await db.flush()
         logger.info("Auth exitosa — email=%s, id=%s", email, user.id)
         return user
 

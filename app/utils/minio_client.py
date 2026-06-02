@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO
+
+logger = logging.getLogger(__name__)
 
 from minio import Minio
 
@@ -111,10 +114,14 @@ class MinioClient:
 
     def remove_object(self, object_name: str) -> None:
         """Elimina un objeto del bucket. No falla si el objeto no existe."""
+        from minio.error import S3Error
         try:
             self.client.remove_object(self.bucket, object_name)
-        except Exception:
-            pass
+        except S3Error as e:
+            if e.code not in ("NoSuchKey", "NotFound"):
+                logger.warning("Error al eliminar %s/%s: %s", self.bucket, object_name, e)
+        except Exception as e:
+            logger.error("Error inesperado al eliminar %s/%s: %s", self.bucket, object_name, e)
 
 
 def get_minio_client(settings: Settings | None = None) -> MinioClient:

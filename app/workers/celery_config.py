@@ -22,13 +22,22 @@ celery_app = Celery(
 # 2. Configuración del BEAT (El despertador)
 celery_app.conf.beat_schedule = {
     "evaluar-certificados-cada-medianoche": {
-        "task": "app.workers.tasks.check_expired_certificates",  # Nombre exacto de la tarea
-        "schedule": crontab(hour=0, minute=0),  # Todos los días a las 00:00
+        "task": "app.workers.tasks.check_expired_certificates",
+        "schedule": crontab(hour=0, minute=0),
+    },
+    "hacer-backup-bd-cada-madrugada": {
+        "task": "app.workers.tasks.backup_database_to_minio",
+        "schedule": crontab(hour=1, minute=0),
     },
     "hacer-backup-bd-cada-madrugada": {
         "task": "app.workers.tasks.backup_database_to_minio",
         "schedule": crontab(hour=1, minute=0),  # Todos los días a las 01:00
     },
 }
+
+celery_app.conf.result_backend = "rpc://"
+celery_app.conf.task_serializer = "json"
+celery_app.conf.result_serializer = "json"
+celery_app.conf.accept_content = ["json"]
 
 celery_app.conf.timezone = "America/Bogota"

@@ -3,13 +3,14 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 
 logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.user_repository import user_repository
@@ -38,8 +39,9 @@ async def list_users(
 
 
 @router.get("/certified", response_model=list[UserWithCertificatesRead])
+@limiter.limit("10/minute")
 async def list_certified_students_public(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request, db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[User]:

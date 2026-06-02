@@ -16,6 +16,7 @@ from app.models.enums import (
     ValidityUnit,
     WorkerStatus,
 )
+from app.models.lesson_task import LessonTask
 from app.models.lesson import Lesson
 from app.models.module import Module
 from app.models.progress import UserProgress
@@ -37,6 +38,7 @@ __all__ = [
     "EmailAudit",
     "IdentityType",
     "Lesson",
+    "LessonTask",
     "Module",
     "User",
     "UserAudit",

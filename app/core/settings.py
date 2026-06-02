@@ -94,6 +94,8 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
+    allowed_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1"], alias="ALLOWED_HOSTS")
+
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
 
     project_name: str = Field(default="Certify API", alias="PROJECT_NAME")
@@ -136,6 +138,20 @@ class Settings(BaseSettings):
     def parse_cors(cls, v: object) -> object:
         if v is None or v == "":
             return ["http://localhost:3000"]
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("["):
+                import json
+
+                return json.loads(s)
+            return [p.strip() for p in s.split(",") if p.strip()]
+        return v
+
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def parse_allowed_hosts(cls, v: object) -> object:
+        if v is None or v == "":
+            return ["localhost", "127.0.0.1"]
         if isinstance(v, str):
             s = v.strip()
             if s.startswith("["):

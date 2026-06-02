@@ -5,13 +5,14 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from minio.error import S3Error
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.settings import get_settings
 from app.models.enums import CertificateStatus, UserRole
 from app.models.user import User
@@ -61,7 +62,8 @@ async def list_certificates(
 
 
 @router.get("/view/{certificate_uuid}")
-async def view_certificate_pdf_public(certificate_uuid: UUID) -> Response:
+@limiter.limit("30/minute")
+async def view_certificate_pdf_public(request: Request, certificate_uuid: UUID) -> Response:
     """Sirve el PDF desde MinIO para visualización en el front (público, solo UUID)."""
     logger.info("Solicitando PDF público — uuid=%s", certificate_uuid)
     settings = get_settings()
@@ -108,7 +110,8 @@ async def view_certificate_pdf_public(certificate_uuid: UUID) -> Response:
 
 
 @router.get("/view/{certificate_uuid}/qr")
-async def view_certificate_qr_public(certificate_uuid: UUID) -> Response:
+@limiter.limit("30/minute")
+async def view_certificate_qr_public(request: Request, certificate_uuid: UUID) -> Response:
     """Sirve el PNG del QR desde MinIO (público)."""
     logger.info("Solicitando QR público — uuid=%s", certificate_uuid)
     settings = get_settings()
@@ -261,8 +264,9 @@ async def delete_certificate(
 
 
 @router.get("/search-by-identity/{identity_number}", response_model=list[CertificateSearchResult])
+@limiter.limit("5/minute")
 async def search_certificates_by_identity(
-    identity_number: str,
+    request: Request, identity_number: str,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[dict]:
     """Público: busca certificados por número de identidad del estudiante."""
