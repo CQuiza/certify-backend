@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     minio_path_tasks: str = Field(
         default="tasks/files", alias="MINIO_PATH_TASKS"
     )
+    minio_path_lesson_files: str = Field(
+        default="lessons/files", alias="MINIO_PATH_LESSON_FILES"
+    )
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_region: str = Field(default="", alias="MINIO_REGION")
 
@@ -127,6 +130,9 @@ class Settings(BaseSettings):
 
     task_max_upload_size_mb: int = Field(
         default=50, alias="TASK_MAX_UPLOAD_SIZE_MB"
+    )
+    lesson_file_max_upload_size_mb: int = Field(
+        default=50, alias="LESSON_FILE_MAX_UPLOAD_SIZE_MB"
     )
 
     rabbitmq_url: str = Field(

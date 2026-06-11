@@ -11,7 +11,9 @@ from app.api.v1.endpoints import (
     courses,
     email_audit,
     health,
+    lesson_files,
     lessons,
+    module_assessments,
     modules,
     tasks,
     user_audit,
@@ -27,7 +29,9 @@ api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(courses.router)
 api_router.include_router(modules.router)
+api_router.include_router(module_assessments.router)
 api_router.include_router(lessons.router)
+api_router.include_router(lesson_files.router)
 api_router.include_router(user_progress.router)
 api_router.include_router(certificate_types.router)
 api_router.include_router(certificates.router)

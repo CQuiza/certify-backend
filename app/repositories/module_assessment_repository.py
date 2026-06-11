@@ -1,0 +1,139 @@
+"""Repositorio de evaluaciones por módulo."""
+
+from collections.abc import Sequence
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models.assessment_option import AssessmentOption
+from app.models.assessment_question import AssessmentQuestion
+from app.models.module_assessment import ModuleAssessment
+
+
+class ModuleAssessmentRepository:
+    async def get_by_id(
+        self, db: AsyncSession, assessment_id: int
+    ) -> ModuleAssessment | None:
+        r = await db.execute(
+            select(ModuleAssessment)
+            .where(ModuleAssessment.id == assessment_id)
+            .options(
+                selectinload(ModuleAssessment.questions).selectinload(
+                    AssessmentQuestion.options
+                )
+            )
+        )
+        return r.scalar_one_or_none()
+
+    async def get_by_module(
+        self, db: AsyncSession, module_id: int
+    ) -> ModuleAssessment | None:
+        r = await db.execute(
+            select(ModuleAssessment)
+            .where(ModuleAssessment.module_id == module_id)
+            .options(
+                selectinload(ModuleAssessment.questions).selectinload(
+                    AssessmentQuestion.options
+                )
+            )
+        )
+        return r.scalar_one_or_none()
+
+    async def get_teacher_view(
+        self, db: AsyncSession, assessment_id: int
+    ) -> ModuleAssessment | None:
+        return await self.get_by_id(db, assessment_id)
+
+    async def get_student_view(
+        self, db: AsyncSession, assessment_id: int
+    ) -> ModuleAssessment | None:
+        return await self.get_by_id(db, assessment_id)
+
+    async def create_with_questions(
+        self,
+        db: AsyncSession,
+        *,
+        module_id: int,
+        passing_score: int,
+        questions_data: list[dict],
+    ) -> ModuleAssessment:
+        assessment = ModuleAssessment(
+            module_id=module_id, passing_score=passing_score
+        )
+        db.add(assessment)
+        await db.flush()
+
+        for qd in questions_data:
+            q = AssessmentQuestion(
+                assessment_id=assessment.id,
+                question_text=qd["question_text"],
+                question_type=qd["question_type"],
+                points=qd.get("points", 1),
+                order_index=qd.get("order_index", 0),
+            )
+            db.add(q)
+            await db.flush()
+
+            for od in qd.get("options", []):
+                opt = AssessmentOption(
+                    question_id=q.id,
+                    option_text=od["option_text"],
+                    is_correct=od.get("is_correct", False),
+                )
+                db.add(opt)
+
+        await db.flush()
+        await db.refresh(assessment)
+        return assessment
+
+    async def update_with_questions(
+        self,
+        db: AsyncSession,
+        assessment: ModuleAssessment,
+        *,
+        passing_score: int,
+        questions_data: list[dict],
+    ) -> ModuleAssessment:
+        assessment.passing_score = passing_score
+
+        old_qs = (
+            await db.execute(
+                select(AssessmentQuestion).where(
+                    AssessmentQuestion.assessment_id == assessment.id
+                )
+            )
+        ).scalars().all()
+        for q in old_qs:
+            await db.delete(q)
+
+        for qd in questions_data:
+            q = AssessmentQuestion(
+                assessment_id=assessment.id,
+                question_text=qd["question_text"],
+                question_type=qd["question_type"],
+                points=qd.get("points", 1),
+                order_index=qd.get("order_index", 0),
+            )
+            db.add(q)
+            await db.flush()
+
+            for od in qd.get("options", []):
+                opt = AssessmentOption(
+                    question_id=q.id,
+                    option_text=od["option_text"],
+                    is_correct=od.get("is_correct", False),
+                )
+                db.add(opt)
+
+        await db.flush()
+        await db.refresh(assessment)
+        return assessment
+
+    async def delete(
+        self, db: AsyncSession, assessment: ModuleAssessment
+    ) -> None:
+        await db.delete(assessment)
+
+
+module_assessment_repository = ModuleAssessmentRepository()

@@ -52,6 +52,17 @@ class CertificateRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CertificateBatchIssueRequest(BaseModel):
+    user_id: int
+    certificate_type_ids: list[int]
+    issued_at: str | None = None
+
+
+class CertificateBatchIssueResponse(BaseModel):
+    issued: list[CertificateRead]
+    errors: list[dict]
+
+
 class CertificateSearchResult(BaseModel):
     user_name: str | None = None
     identity_number: str | None = None

@@ -19,6 +19,8 @@ from app.models.user import User
 from app.repositories.certificate_repository import certificate_repository
 from app.repositories.user_repository import user_repository
 from app.schemas.certificate import (
+    CertificateBatchIssueRequest,
+    CertificateBatchIssueResponse,
     CertificateIssueRequest,
     CertificateRead,
     CertificateSearchResult,
@@ -201,6 +203,31 @@ async def create_certificate(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+
+@router.post("/batch", response_model=CertificateBatchIssueResponse, status_code=status.HTTP_201_CREATED)
+async def batch_issue_certificates(
+    body: CertificateBatchIssueRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+    background_tasks: BackgroundTasks,
+) -> dict:
+    issued: list[CertificateRead] = []
+    errors: list[dict] = []
+    for ct_id in body.certificate_type_ids:
+        try:
+            cert = await certificate_lifecycle.issue_certificate(
+                db,
+                admin=current,
+                user_id=body.user_id,
+                certificate_type_id=ct_id,
+                issued_at=body.issued_at,
+                background_tasks=background_tasks,
+            )
+            issued.append(CertificateRead.model_validate(cert))
+        except (PermissionError, ValueError, RuntimeError) as e:
+            errors.append({"certificate_type_id": ct_id, "error": str(e)})
+    return CertificateBatchIssueResponse(issued=issued, errors=errors).model_dump()
 
 
 @router.patch("/{certificate_id}", response_model=CertificateRead)
