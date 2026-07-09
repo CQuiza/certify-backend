@@ -32,6 +32,22 @@ from app.utils.minio_client import get_minio_client
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
+_ALLOWED_EXTENSIONS = {"jpg", "png", "pdf", "docx", "pptx", "xlsx"}
+
+
+def _validate_file_extension(filename: str) -> None:
+    if "." not in filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo debe tener una extensión",
+        )
+    ext = filename.rsplit(".", 1)[-1].lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Extensión .{ext} no permitida. Extensiones aceptadas: {', '.join(sorted(_ALLOWED_EXTENSIONS))}",
+        )
+
 
 async def _assert_can_manage(
     db: AsyncSession,
@@ -149,6 +165,9 @@ async def upload_task_file(
     if lesson:
         await _assert_can_manage(db, current, lesson)
 
+    original_filename = file.filename or f"task-{task_id}"
+    _validate_file_extension(original_filename)
+
     settings = get_settings()
     max_size = settings.task_max_upload_size_mb * 1024 * 1024
     data = await file.read()
@@ -157,7 +176,6 @@ async def upload_task_file(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"El archivo supera el límite de {settings.task_max_upload_size_mb} MB",
         )
-    original_filename = file.filename or f"task-{task_id}"
     ext = ""
     if original_filename and "." in original_filename:
         ext = original_filename.rsplit(".", 1)[-1]

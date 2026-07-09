@@ -22,6 +22,7 @@ from app.schemas.certificate import (
     CertificateBatchIssueRequest,
     CertificateBatchIssueResponse,
     CertificateIssueRequest,
+    CertificateListResponse,
     CertificateRead,
     CertificateSearchResult,
     CertificateUpdate,
@@ -35,19 +36,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/certificates", tags=["certificates"])
 
 
-@router.get("", response_model=list[CertificateRead])
+@router.get("", response_model=CertificateListResponse)
 async def list_certificates(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
     user_id: Annotated[int | None, Query()] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list:
+    search: Annotated[str | None, Query()] = None,
+) -> CertificateListResponse:
     if current.role == UserRole.student.value:
-        rows = await certificate_repository.list_by_user(
-            db, current.id, skip=skip, limit=limit
-        )
-        return list(rows)
+        total = await certificate_repository.count_by_user(db, current.id, search=search)
+        rows = await certificate_repository.list_by_user(db, current.id, skip=skip, limit=limit, search=search)
+        return CertificateListResponse(items=list(rows), total=total)
     uid = user_id
     if uid is None:
         if not is_super_or_admin(current):
@@ -55,12 +56,14 @@ async def list_certificates(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Indique user_id o sea admin",
             )
-        rows = await certificate_repository.list(db, skip=skip, limit=limit)
-        return list(rows)
+        total = await certificate_repository.count(db, search=search, join_user=True)
+        rows = await certificate_repository.list(db, skip=skip, limit=limit, search=search)
+        return CertificateListResponse(items=list(rows), total=total)
     if uid != current.id and not is_super_or_admin(current):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
-    rows = await certificate_repository.list_by_user(db, uid, skip=skip, limit=limit)
-    return list(rows)
+    total = await certificate_repository.count_by_user(db, uid, search=search)
+    rows = await certificate_repository.list_by_user(db, uid, skip=skip, limit=limit, search=search)
+    return CertificateListResponse(items=list(rows), total=total)
 
 
 @router.get("/view/{certificate_uuid}")
@@ -195,6 +198,7 @@ async def create_certificate(
             user_id=body.user_id,
             certificate_type_id=body.certificate_type_id,
             issued_at=body.issued_at,
+            validity_extension=body.validity_extension,
             background_tasks=background_tasks,
         )
     except PermissionError as e:

@@ -6,7 +6,12 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_password_hash, verify_password
+from app.core.security import (
+    generate_secure_password,
+    get_password_hash,
+    validate_password_strength,
+    verify_password,
+)
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.user_repository import user_repository
@@ -70,7 +75,12 @@ class UserService:
             logger.warning("Teléfono duplicado — phone=%s", data.phone_number)
             raise ValueError("El número de teléfono ya está registrado")
 
-        hashed = get_password_hash(data.password)
+        plain_password = data.password or generate_secure_password()
+        if data.password:
+            pw_errors = validate_password_strength(plain_password)
+            if pw_errors:
+                raise ValueError("; ".join(pw_errors))
+        hashed = get_password_hash(plain_password)
         user = await user_repository.create(
             db,
             email=data.email,
@@ -87,7 +97,7 @@ class UserService:
         if background_tasks:
             background_tasks.add_task(
                 send_credentials_with_audit,
-                data.email, data.password, user.name,
+                data.email, plain_password, user.name,
             )
         logger.info("Usuario creado — id=%s, email=%s, role=%s", user.id, user.email, user.role)
         return user
@@ -128,6 +138,9 @@ class UserService:
                 raise ValueError("El número de teléfono ya está registrado")
 
         if "password" in payload:
+            pw_errors = validate_password_strength(payload["password"])
+            if pw_errors:
+                raise ValueError("; ".join(pw_errors))
             payload["password_hash"] = get_password_hash(payload.pop("password"))
         if "role" in payload and payload["role"] is not None:
             payload["role"] = payload["role"].value

@@ -174,6 +174,7 @@ class CertificateEditorData:
     certificate_type_kind: str
     certificate_type_name: str
     hours: int
+    validity_years: int | None = None
 
 
 class CertificateEditor:
@@ -312,6 +313,14 @@ class CertificateEditor:
         qx = w_pt - _LAYOUT["qr_from_right"] - side
         qy = _LAYOUT["qr_from_bottom"]
         c.drawImage(ir, qx, qy, width=side, height=side, mask="auto")
+
+        # Línea de vigencia (centrada, alineada con parte inferior del QR)
+        if data.validity_years is not None:
+            from app.services.datetime_utils import number_to_spanish_years_text
+            c.setFont(f_tahoma, 9)
+            c.setFillColor(navy)
+            text = f"Este certificado tiene vigencia de {number_to_spanish_years_text(data.validity_years)} desde su fecha de emisión"
+            c.drawCentredString(cx, _LAYOUT["qr_from_bottom"], text)
 
         c.showPage()
         c.save()

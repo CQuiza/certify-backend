@@ -5,7 +5,9 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.course import CourseEnrollment
+from sqlalchemy.orm import joinedload
+
+from app.models.course import Course, CourseEnrollment
 
 
 class CourseEnrollmentRepository:
@@ -61,6 +63,23 @@ class CourseEnrollmentRepository:
 
     async def list(self, db: AsyncSession, *, skip: int = 0, limit: int = 500) -> Sequence[CourseEnrollment]:
         r = await db.execute(select(CourseEnrollment).offset(skip).limit(limit))
+        return r.scalars().all()
+
+    async def list_by_teacher_courses(
+        self,
+        db: AsyncSession,
+        teacher_id: int,
+        *,
+        skip: int = 0,
+        limit: int = 500,
+    ) -> Sequence[CourseEnrollment]:
+        r = await db.execute(
+            select(CourseEnrollment)
+            .join(Course, CourseEnrollment.course_id == Course.id)
+            .where(Course.teacher_id == teacher_id)
+            .offset(skip)
+            .limit(limit),
+        )
         return r.scalars().all()
 
     async def create(self, db: AsyncSession, *, user_id: int, course_id: int) -> CourseEnrollment:

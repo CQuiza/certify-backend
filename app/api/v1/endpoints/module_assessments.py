@@ -1,5 +1,6 @@
 """Endpoints de evaluaciones por módulo y progreso."""
 
+import random
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -65,13 +66,12 @@ async def _get_module_or_404(db: AsyncSession, module_id: int) -> Module:
 
 @router.get(
     "/modules/{module_id}/assessment",
-    response_model=ModuleAssessmentReadTeacher | ModuleAssessmentRead,
 )
 async def get_module_assessment(
     module_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
-) -> object:
+) -> ModuleAssessmentReadTeacher | ModuleAssessmentRead:
     mod = await _get_module_or_404(db, module_id)
     await require_course_visible(db, current, mod.course_id, need_content=True)
 
@@ -83,47 +83,12 @@ async def get_module_assessment(
 
     if is_super_or_admin(current) or is_teacher(current):
         await teacher_owns_module(db, current, mod) if is_teacher(current) else None
-        return ModuleAssessmentReadTeacher(
-            id=assessment.id,
-            module_id=assessment.module_id,
-            passing_score=assessment.passing_score,
-            questions=[
-                {
-                    "id": q.id,
-                    "question_text": q.question_text,
-                    "question_type": q.question_type,
-                    "points": q.points,
-                    "order_index": q.order_index,
-                    "options": [
-                        {
-                            "id": o.id,
-                            "option_text": o.option_text,
-                            "is_correct": o.is_correct,
-                        }
-                        for o in q.options
-                    ],
-                }
-                for q in assessment.questions
-            ],
-        )
-    return ModuleAssessmentRead(
-        id=assessment.id,
-        module_id=assessment.module_id,
-        passing_score=assessment.passing_score,
-        questions=[
-            {
-                "id": q.id,
-                "question_text": q.question_text,
-                "question_type": q.question_type,
-                "points": q.points,
-                "order_index": q.order_index,
-                "options": [
-                    {"id": o.id, "option_text": o.option_text} for o in q.options
-                ],
-            }
-            for q in assessment.questions
-        ],
-    )
+        return ModuleAssessmentReadTeacher.model_validate(assessment)
+
+    data = ModuleAssessmentRead.model_validate(assessment)
+    for q in data.questions:
+        q.options = random.sample(q.options, len(q.options))
+    return data
 
 
 # ─── POST /modules/{module_id}/assessment (upsert) ────────────
@@ -173,7 +138,7 @@ async def upsert_module_assessment(
             questions_data=questions_data,
         )
 
-    return await module_assessment_repository.get_teacher_view(db, assessment.id)
+    return await module_assessment_repository.get_by_id(db, assessment.id)
 
 
 # ─── DELETE /assessments/{assessment_id} ────────────────────

@@ -21,7 +21,7 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8)
+    password: str | None = None
 
 
 class UserUpdate(BaseModel):
@@ -39,6 +39,11 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
 
 
 class UserRead(BaseModel):
@@ -62,4 +67,14 @@ class UserRead(BaseModel):
 
 class UserWithCertificatesRead(UserRead):
     certificates: list[CertificateRead] = []
+
+
+class UserListResponse(BaseModel):
+    items: list[UserRead]
+    total: int
+
+
+class UserWithCertificatesListResponse(BaseModel):
+    items: list[UserWithCertificatesRead]
+    total: int
 

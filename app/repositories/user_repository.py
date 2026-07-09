@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import UserRole
@@ -26,6 +26,33 @@ class UserRepository:
         r = await db.execute(select(User).where(User.phone_number == phone_number))
         return r.scalar_one_or_none()
 
+    def _apply_filters(self, q, *, role, exclude_superuser, search):
+        if role is not None:
+            q = q.where(User.role == role.value)
+        if exclude_superuser:
+            q = q.where(User.role != UserRole.superuser.value)
+        if search:
+            pattern = f"%{search}%"
+            q = q.where(
+                User.name.ilike(pattern)
+                | User.email.ilike(pattern)
+                | User.identity_number.ilike(pattern)
+            )
+        return q
+
+    async def count(
+        self,
+        db: AsyncSession,
+        *,
+        role: UserRole | None = None,
+        exclude_superuser: bool = False,
+        search: str | None = None,
+    ) -> int:
+        q = select(func.count(User.id))
+        q = self._apply_filters(q, role=role, exclude_superuser=exclude_superuser, search=search)
+        r = await db.execute(q)
+        return r.scalar() or 0
+
     async def list(
         self,
         db: AsyncSession,
@@ -34,12 +61,10 @@ class UserRepository:
         limit: int = 100,
         role: UserRole | None = None,
         exclude_superuser: bool = False,
+        search: str | None = None,
     ) -> Sequence[User]:
         q = select(User).offset(skip).limit(limit)
-        if role is not None:
-            q = q.where(User.role == role.value)
-        if exclude_superuser:
-            q = q.where(User.role != UserRole.superuser.value)
+        q = self._apply_filters(q, role=role, exclude_superuser=exclude_superuser, search=search)
         r = await db.execute(q.order_by(User.id))
         return r.scalars().all()
 
@@ -95,15 +120,45 @@ class UserRepository:
         await db.refresh(user)
         return user
 
+    async def count_certified_students(
+        self,
+        db: AsyncSession,
+        *,
+        search: str | None = None,
+    ) -> int:
+        from app.models.certificate import Certificate
+        from app.models.certificate_type import CertificateType
+
+        q = (
+            select(func.count(User.id.distinct()))
+            .select_from(User)
+            .join(Certificate, User.id == Certificate.user_id)
+            .where(User.role == UserRole.student.value)
+        )
+        if search:
+            pattern = f"%{search}%"
+            q = q.outerjoin(CertificateType, Certificate.certificate_type_id == CertificateType.id)
+            q = q.where(
+                User.name.ilike(pattern)
+                | User.email.ilike(pattern)
+                | User.identity_number.ilike(pattern)
+                | cast(Certificate.unique_id, String).ilike(pattern)
+                | CertificateType.name.ilike(pattern)
+            )
+        r = await db.execute(q)
+        return r.scalar() or 0
+
     async def list_certified_students(
         self,
         db: AsyncSession,
         *,
         skip: int = 0,
         limit: int = 100,
+        search: str | None = None,
     ) -> Sequence[User]:
         from sqlalchemy.orm import selectinload
         from app.models.certificate import Certificate
+        from app.models.certificate_type import CertificateType
 
         q = (
             select(User)
@@ -111,9 +166,18 @@ class UserRepository:
             .where(User.role == UserRole.student.value)
             .distinct()
             .options(selectinload(User.certificates))
-            .offset(skip)
-            .limit(limit)
         )
+        if search:
+            pattern = f"%{search}%"
+            q = q.outerjoin(CertificateType, Certificate.certificate_type_id == CertificateType.id)
+            q = q.where(
+                User.name.ilike(pattern)
+                | User.email.ilike(pattern)
+                | User.identity_number.ilike(pattern)
+                | cast(Certificate.unique_id, String).ilike(pattern)
+                | CertificateType.name.ilike(pattern)
+            )
+        q = q.offset(skip).limit(limit)
         r = await db.execute(q.order_by(User.id))
         return r.scalars().all()
 

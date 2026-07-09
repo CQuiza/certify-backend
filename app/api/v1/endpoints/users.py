@@ -14,41 +14,54 @@ from app.core.rate_limit import limiter
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.user_repository import user_repository
-from app.schemas.user import UserCreate, UserRead, UserUpdate, UserWithCertificatesRead
+from app.schemas.user import (
+    ChangePasswordRequest,
+    UserCreate,
+    UserListResponse,
+    UserRead,
+    UserUpdate,
+    UserWithCertificatesListResponse,
+    UserWithCertificatesRead,
+)
 from app.services.access import is_super_or_admin
 from app.services.user_service import user_service
+from app.core.security import get_password_hash, validate_password_strength, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-@router.get("", response_model=list[UserRead])
+@router.get("", response_model=UserListResponse)
 async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     role: UserRole | None = None,
-) -> list[User]:
+    search: Annotated[str | None, Query()] = None,
+) -> UserListResponse:
     if not is_super_or_admin(current):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
     if role == UserRole.superuser and current.role != UserRole.superuser.value:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo superusuarios pueden listar superusuarios")
     exclude_superuser = current.role != UserRole.superuser.value
-    rows = await user_repository.list(db, skip=skip, limit=limit, role=role, exclude_superuser=exclude_superuser)
-    return list(rows)
+    total = await user_repository.count(db, role=role, exclude_superuser=exclude_superuser, search=search)
+    rows = await user_repository.list(db, skip=skip, limit=limit, role=role, exclude_superuser=exclude_superuser, search=search)
+    return UserListResponse(items=list(rows), total=total)
 
 
-@router.get("/certified", response_model=list[UserWithCertificatesRead])
+@router.get("/certified", response_model=UserWithCertificatesListResponse)
 async def list_certified_students(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[User]:
+    search: Annotated[str | None, Query()] = None,
+) -> UserWithCertificatesListResponse:
     if not is_super_or_admin(current):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
-    rows = await user_repository.list_certified_students(db, skip=skip, limit=limit)
-    return list(rows)
+    total = await user_repository.count_certified_students(db, search=search)
+    rows = await user_repository.list_certified_students(db, skip=skip, limit=limit, search=search)
+    return UserWithCertificatesListResponse(items=list(rows), total=total)
 
 
 @router.get("/{user_id}", response_model=UserRead)
@@ -94,7 +107,7 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    if not is_super_or_admin(current) and current.id != user_id:
+    if not is_super_or_admin(current):
         logger.warning("Intento de actualizar usuario sin permiso — target=%s, by=%s", user_id, current.email)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
     if current.id == user_id and body.role is not None and not is_super_or_admin(current):
@@ -109,6 +122,24 @@ async def update_user(
     updated = await user_service.update_user(db, u, body, requesting_role=current.role)
     logger.info("Usuario actualizado vía API — id=%s, by=%s", updated.id, current.email)
     return updated
+
+
+@router.post("/change-password", response_model=dict)
+async def change_password(
+    body: ChangePasswordRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    if not verify_password(body.current_password, current.password_hash):
+        logger.warning("Cambio password fallido — id=%s: contraseña actual incorrecta", current.id)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contraseña actual incorrecta")
+    pw_errors = validate_password_strength(body.new_password)
+    if pw_errors:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="; ".join(pw_errors))
+    new_hash = get_password_hash(body.new_password)
+    await user_repository.update(db, current, {"password_hash": new_hash})
+    logger.info("Password cambiada exitosamente — id=%s", current.id)
+    return {"message": "Contraseña actualizada correctamente"}
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_200_OK)

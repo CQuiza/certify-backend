@@ -7,6 +7,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class TaskProgressItem(BaseModel):
+    task_id: int
+    task_title: str
+    submitted: bool
+    submission_id: int | None = None
+    file_url: str | None = None
+    original_filename: str | None = None
+    submitted_at: datetime | None = None
+
+
 class AssessmentOptionCreate(BaseModel):
     option_text: str = Field(..., max_length=255)
     is_correct: bool = False
@@ -95,6 +105,9 @@ class ModuleProgressItem(BaseModel):
     attempts_count: int
     last_score: float | None = None
     passed: bool
+    total_tasks: int = 0
+    submitted_tasks: int = 0
+    tasks: list[TaskProgressItem] = []
 
 
 class CourseProgressSummary(BaseModel):

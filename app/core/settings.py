@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     minio_path_lesson_files: str = Field(
         default="lessons/files", alias="MINIO_PATH_LESSON_FILES"
     )
+    minio_path_task_submissions: str = Field(
+        default="tasks/submissions", alias="MINIO_PATH_TASK_SUBMISSIONS"
+    )
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_region: str = Field(default="", alias="MINIO_REGION")
 

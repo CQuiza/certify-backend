@@ -2,6 +2,7 @@
 
 import hashlib
 import secrets
+import string
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -69,3 +70,42 @@ REFRESH_TOKEN_DAYS = 30
 
 def refresh_token_expires_at() -> datetime:
     return datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_DAYS)
+
+
+SPECIAL_CHARS = "!@#$%^&*()-_=+"
+
+
+def generate_secure_password(length: int = 16) -> str:
+    """Genera una contraseña criptográficamente segura que cumple las reglas de validación.
+
+    Garantiza al menos: una mayúscula, una minúscula, un dígito y un carácter especial.
+    """
+    all_chars = string.ascii_letters + string.digits + SPECIAL_CHARS
+    pw = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+        secrets.choice(SPECIAL_CHARS),
+    ]
+    pw += [secrets.choice(all_chars) for _ in range(length - 4)]
+    secrets.SystemRandom().shuffle(pw)
+    return "".join(pw)
+
+
+def validate_password_strength(password: str) -> list[str]:
+    """Valida que la contraseña cumpla los estándares OWASP 2023.
+
+    Retorna lista de mensajes de error. Vacía si es válida.
+    """
+    errors: list[str] = []
+    if len(password) < 8:
+        errors.append("Debe tener al menos 8 caracteres")
+    if not any(c.isupper() for c in password):
+        errors.append("Debe contener al menos una letra mayúscula")
+    if not any(c.islower() for c in password):
+        errors.append("Debe contener al menos una letra minúscula")
+    if not any(c.isdigit() for c in password):
+        errors.append("Debe contener al menos un número")
+    if not any(c in SPECIAL_CHARS for c in password):
+        errors.append(f"Debe contener al menos un carácter especial ({SPECIAL_CHARS})")
+    return errors

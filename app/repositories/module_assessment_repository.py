@@ -40,16 +40,6 @@ class ModuleAssessmentRepository:
         )
         return r.scalar_one_or_none()
 
-    async def get_teacher_view(
-        self, db: AsyncSession, assessment_id: int
-    ) -> ModuleAssessment | None:
-        return await self.get_by_id(db, assessment_id)
-
-    async def get_student_view(
-        self, db: AsyncSession, assessment_id: int
-    ) -> ModuleAssessment | None:
-        return await self.get_by_id(db, assessment_id)
-
     async def create_with_questions(
         self,
         db: AsyncSession,

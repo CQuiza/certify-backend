@@ -8,6 +8,7 @@ def credentials_body(app_name: str, email_to: str, password: str, login_url: str
     <p>Tu cuenta ha sido creada exitosamente. Estas son tus credenciales de acceso:</p>
     <p><strong>Correo:</strong> {email_to}</p>
     <p><strong>Contraseña:</strong> {password}</p>
+    <p style="color: #dc2626; font-weight: bold;">IMPORTANTE: Debes cambiar tu contraseña inmediatamente después de iniciar sesión por primera vez.</p>
     <p>Puedes acceder en el siguiente enlace:</p>
     <p><a href="{login_url}">{login_url}</a></p>
 </body>

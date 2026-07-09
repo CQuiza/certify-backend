@@ -20,6 +20,7 @@ from app.models.enums import (
 )
 from app.models.lesson_file import LessonFile
 from app.models.lesson_task import LessonTask
+from app.models.task_submission import TaskSubmission
 from app.models.lesson import Lesson
 from app.models.module import Module
 from app.models.module_assessment import ModuleAssessment
@@ -47,6 +48,7 @@ __all__ = [
     "Lesson",
     "LessonFile",
     "LessonTask",
+    "TaskSubmission",
     "Module",
     "ModuleAssessment",
     "User",
