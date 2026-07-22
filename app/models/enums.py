@@ -13,6 +13,9 @@ class UserRole(str, Enum):
 class IdentityType(str, Enum):
     CC = "CC"
     TI = "TI"
+    CE = "CE"
+    PPT = "PPT"
+    PASSPORT = "PASSPORT"
     OTHER = "OTHER"
 
 

@@ -24,7 +24,7 @@ class User(Base):
             name="ck_users_role",
         ),
         CheckConstraint(
-            "identity_type IN ('CC', 'TI', 'OTHER')",
+            "identity_type IN ('CC', 'TI', 'CE', 'PPT', 'PASSPORT', 'OTHER')",
             name="ck_users_identity_type",
         ),
     )
