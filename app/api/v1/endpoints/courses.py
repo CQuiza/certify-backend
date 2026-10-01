@@ -22,7 +22,7 @@ async def list_courses(
     db: Annotated[AsyncSession, Depends(get_db)],
     optional_user: Annotated[User | None, Depends(get_optional_user)],
     skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    limit: Annotated[int, Query(ge=1, le=10000)] = 5000,
 ) -> list:
     rows = await course_service.list_for_actor(db, actor=optional_user, skip=skip, limit=limit)
     if optional_user and is_super_or_admin(optional_user):

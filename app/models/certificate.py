@@ -53,6 +53,12 @@ class Certificate(Base):
         server_default=func.now(),
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hours: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="Override de intensidad horaria (NULL = sigue el tipo)"
+    )
+    validity_years: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="Override de vigencia en años (NULL = sigue el tipo)"
+    )
     status: Mapped[str] = mapped_column(
         String(20), default="active", server_default="active"
     )

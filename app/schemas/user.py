@@ -63,6 +63,13 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UserUpdateResponse(UserRead):
+    """Respuesta de PATCH /users/{id}: incluye cuántos certificados activos
+    fueron reproducidos con los datos actualizados del usuario."""
+
+    certificates_regenerated: int = 0
+
+
 
 
 class UserWithCertificatesRead(UserRead):

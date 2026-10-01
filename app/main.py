@@ -196,7 +196,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "0"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Cache-Control"] = "no-store"
+    response.headers["Cache-Control"] = "no-cache, private"
     return response
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)

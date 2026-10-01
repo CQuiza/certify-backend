@@ -44,9 +44,13 @@ class CertificateRepository:
         skip: int = 0,
         limit: int = 100,
         search: str | None = None,
+        statuses: Sequence[str] | None = None,
     ) -> Sequence[Certificate]:
-        q = select(Certificate).where(Certificate.user_id == user_id).offset(skip).limit(limit)
+        q = select(Certificate).where(Certificate.user_id == user_id)
+        if statuses is not None:
+            q = q.where(Certificate.status.in_(statuses))
         q = self._apply_search(q, search=search)
+        q = q.offset(skip).limit(limit).order_by(Certificate.id)
         r = await db.execute(q)
         return r.scalars().all()
 

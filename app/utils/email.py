@@ -62,6 +62,7 @@ async def send_certificate_issued_email(
     certificate_uid: str,
     base_url: str,
     api_prefix: str = "",
+    certificate_type_name: str | None = None,
 ) -> None:
     """Envía un correo notificando la emisión de un certificado."""
     conf = _get_mail_config()
@@ -75,7 +76,7 @@ async def send_certificate_issued_email(
     message = MessageSchema(
         subject=f"Tu certificado ha sido emitido — {app_name}",
         recipients=[email_to],
-        body=issued_body(app_name, student_name, verify_link),
+        body=issued_body(app_name, student_name, verify_link, certificate_type_name),
         subtype="html",
     )
     fm = FastMail(conf)
@@ -149,13 +150,14 @@ async def send_issued_with_audit(
     base_url: str,
     api_prefix: str,
     user_name: str | None = None,
+    certificate_type_name: str | None = None,
 ) -> None:
     """Notifica emisión de certificado y registra resultado en email_audit."""
     status = EmailStatus.failed.value
     error_text: str | None = None
     try:
         await send_certificate_issued_email(
-            email_to, student_name, certificate_uid, base_url, api_prefix
+            email_to, student_name, certificate_uid, base_url, api_prefix, certificate_type_name
         )
         status = EmailStatus.sent.value
     except Exception as e:

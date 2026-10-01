@@ -29,6 +29,23 @@ class CertificateIssueRequest(BaseModel):
     validity_extension: int | None = Field(
         default=None, description="Sobreescribe la vigencia del tipo (en años)"
     )
+    hours: int | None = Field(
+        default=None, ge=0, description="Sobreescribe la intensidad horaria para este certificado (NULL = tipo)"
+    )
+
+
+class CertificateRenewRequest(BaseModel):
+    """Renovación — reemplaza el certificado actual por uno nuevo."""
+
+    issued_at: datetime | None = Field(
+        default=None, description="Fecha de emisión del certificado renovado (default: hoy)"
+    )
+    validity_extension: int | None = Field(
+        default=None, description="Sobreescribe la vigencia del tipo (en años, default: vigencia original)"
+    )
+    hours: int | None = Field(
+        default=None, ge=0, description="Sobreescribe la intensidad horaria para el certificado renovado (NULL = tipo)"
+    )
 
 
 class CertificateUpdate(BaseModel):
@@ -58,7 +75,15 @@ class CertificateRead(BaseModel):
 class CertificateBatchIssueRequest(BaseModel):
     user_id: int
     certificate_type_ids: list[int]
-    issued_at: str | None = None
+    issued_at: datetime | None = Field(
+        default=None, description="Fecha personalizada de emisión"
+    )
+    validity_extension: int | None = Field(
+        default=None, description="Sobreescribe la vigencia del tipo (en años); aplica a la emisión de un único tipo"
+    )
+    hours: int | None = Field(
+        default=None, ge=0, description="Sobreescribe la intensidad horaria (NULL = tipo); aplica a la emisión de un único tipo"
+    )
 
 
 class CertificateBatchIssueResponse(BaseModel):
