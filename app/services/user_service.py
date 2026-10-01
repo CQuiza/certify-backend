@@ -27,13 +27,23 @@ LOCKOUT_MINUTES = 15
 class UserService:
     async def authenticate(self, db: AsyncSession, email: str, password: str) -> User | None:
         user = await user_repository.get_by_email(db, email)
-        if not user or not user.is_active:
-            logger.warning("Auth fallida — email=%s: usuario no encontrado o inactivo", email)
+        if not user:
+            logger.warning("Auth fallida — email=%s: usuario no encontrado", email)
             return None
 
+        if not user.is_active:
+            logger.warning("Auth fallida — email=%s: usuario inactivo", email)
+            raise PermissionError("Tu cuenta está desactivada. Contacta al administrador.")
+
         if user.locked_until and user.locked_until > datetime.now(UTC):
+            remaining = user.locked_until - datetime.now(UTC)
+            minutes = max(1, (remaining.seconds + 59) // 60)
             logger.warning("Auth bloqueada — email=%s: cuenta bloqueada hasta %s", email, user.locked_until)
-            return None
+            msg = (
+                f"Cuenta bloqueada por intentos fallidos. "
+                f"Intente de nuevo en {minutes} minuto{'s' if minutes != 1 else ''}."
+            )
+            raise PermissionError(msg)
 
         if not verify_password(password, user.password_hash):
             user.failed_login_attempts += 1
