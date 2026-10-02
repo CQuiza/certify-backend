@@ -199,6 +199,7 @@ async def create_pending_certificate(
 
     from app.models.course import Course, CourseEnrollment
     from sqlalchemy import select
+    from app.repositories.enrollment_repository import course_enrollment_repository
 
     r = await db.execute(select(Course).where(Course.id == body.course_id))
     course = r.scalar_one_or_none()
@@ -211,16 +212,15 @@ async def create_pending_certificate(
             detail="El curso no tiene tipo de certificado asociado",
         )
 
-    enrolled = await db.execute(
-        select(CourseEnrollment).where(
-            CourseEnrollment.course_id == body.course_id,
-            CourseEnrollment.user_id == body.user_id,
-        )
+    # En modo "en proceso" el certificado aún no existe: la solicitud concede
+    # acceso al curso. Si el estudiante no está inscrito, se le asigna
+    # automáticamente para que pueda completarlo y se emita el certificado.
+    enrolled = await course_enrollment_repository.get_by_user_course(
+        db, body.user_id, body.course_id
     )
-    if enrolled.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El estudiante no está inscrito en este curso",
+    if enrolled is None:
+        await course_enrollment_repository.create(
+            db, user_id=body.user_id, course_id=body.course_id
         )
 
     existing = await pending_certificate_repository.get_by_user_and_course(db, body.user_id, body.course_id)
