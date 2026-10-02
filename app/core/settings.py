@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     minio_path_task_submissions: str = Field(
         default="tasks/submissions", alias="MINIO_PATH_TASK_SUBMISSIONS"
     )
+    minio_path_certificate_template: str = Field(
+        default="certificate/template", alias="MINIO_PATH_CERTIFICATE_TEMPLATE"
+    )
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_region: str = Field(default="", alias="MINIO_REGION")
 

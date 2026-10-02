@@ -182,32 +182,36 @@ class CertificateEditorData:
 
 class CertificateEditor:
     """
-    Fusiona ``certificate_template.pdf`` con una capa de texto + QR.
+    Fusiona la plantilla de certificado con una capa de texto + QR.
     ``certificate_reference.pdf`` sirve solo como guía visual para ajustar ``_LAYOUT``.
     """
 
-    def __init__(self, base_pdf_path: Path | str | None = None) -> None:
+    def __init__(self, base_pdf: Path | str | bytes | None = None) -> None:
         default = (
             Path(__file__).resolve().parent.parent
             / "templates"
             / "certificate_template.pdf"
         )
-        self._base_pdf_path = (
-            Path(base_pdf_path) if base_pdf_path is not None else default
+        self._base_pdf: Path | bytes = (
+            base_pdf if isinstance(base_pdf, bytes) else Path(base_pdf) if base_pdf is not None else default
         )
 
     @property
-    def base_pdf_path(self) -> Path:
-        return self._base_pdf_path
+    def base_pdf_path(self) -> Path | bytes:
+        return self._base_pdf
+
+    def _load_base_reader(self) -> PdfReader:
+        if isinstance(self._base_pdf, bytes):
+            return PdfReader(BytesIO(self._base_pdf))
+        if not self._base_pdf.is_file():
+            msg = f"No existe la plantilla PDF: {self._base_pdf}"
+            raise FileNotFoundError(msg)
+        return PdfReader(str(self._base_pdf))
 
     def build_merged_pdf(
         self, data: CertificateEditorData, qr_png: BinaryIO
     ) -> BytesIO:
-        if not self._base_pdf_path.is_file():
-            msg = f"No existe la plantilla PDF: {self._base_pdf_path}"
-            raise FileNotFoundError(msg)
-
-        base_reader = PdfReader(str(self._base_pdf_path))
+        base_reader = self._load_base_reader()
         if not base_reader.pages:
             msg = "La plantilla no tiene páginas"
             raise ValueError(msg)

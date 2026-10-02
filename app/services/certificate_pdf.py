@@ -28,6 +28,28 @@ def _resolve_under_app(path_str: str) -> Path:
     return p if p.is_absolute() else _APP_ROOT / p
 
 
+_TEMPLATE_OBJECT_NAME = "certificate_template.pdf"
+
+
+def resolve_certificate_template(settings: Settings) -> Path | bytes:
+    """Devuelve la plantilla del certificado en uso.
+
+    Prioridad: plantilla custom en MinIO (si existe); si no, la plantilla
+    estática por defecto. Devuelve bytes (custom) o Path (default).
+    """
+    if settings.minio_access_key and settings.minio_secret_key:
+        from app.utils.minio_client import get_minio_client
+
+        try:
+            client = get_minio_client(settings)
+            prefix = settings.minio_path_certificate_template.strip().strip("/")
+            object_name = f"{prefix}/{_TEMPLATE_OBJECT_NAME}" if prefix else _TEMPLATE_OBJECT_NAME
+            return client.download_bytes(object_name)
+        except Exception:
+            logger.debug("No hay plantilla custom en MinIO; usando default.")
+    return _resolve_under_app(settings.certificate_template_pdf)
+
+
 def _issued_date(cert: Certificate) -> datetime:
     t = cert.issued_at
     if t is None:
@@ -55,7 +77,7 @@ class CertificatePdfService:
         box = max(4, min(14, settings.qr_size // 20))
         qr_io = MakeQRCode(box_size=box).to_bytesio(verify_url)
 
-        tpl = _resolve_under_app(settings.certificate_template_pdf)
+        tpl = resolve_certificate_template(settings)
         editor = CertificateEditor(tpl)
         overlay = CertificateEditorData(
             issued_on=issued_at.date(),
