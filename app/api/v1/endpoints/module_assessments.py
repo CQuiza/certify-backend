@@ -1,11 +1,14 @@
 """Endpoints de evaluaciones por módulo y progreso."""
 
+import logging
 import random
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
@@ -197,6 +200,21 @@ async def submit_assessment(
         attempt,
         answers=[a.model_dump() for a in body.answers],
     )
+    await db.commit()
+
+    if current.role == UserRole.student.value:
+        from app.services.certificate_lifecycle import certificate_lifecycle
+
+        try:
+            await certificate_lifecycle.maybe_issue_pending(
+                db, user_id=current.id, course_id=mod.course_id
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("Error emitiendo certificado pendiente — user=%s, course=%s",
+                            current.id, mod.course_id)
+
     return result
 
 

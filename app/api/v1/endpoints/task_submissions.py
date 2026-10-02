@@ -1,6 +1,7 @@
 """Entregas de tareas por estudiantes."""
 
 import asyncio
+import logging
 import re
 from typing import Annotated
 
@@ -23,6 +24,8 @@ from app.repositories.task_submission_repository import task_submission_reposito
 from app.schemas.task_submission import TaskSubmissionRead, TaskSubmissionWithUserRead
 from app.services.access import is_super_or_admin, is_teacher, require_course_visible
 from app.utils.minio_client import get_minio_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["task-submissions"])
 
@@ -131,7 +134,7 @@ async def submit_task(
             detail=f"Error al subir archivo: {e}",
         )
 
-    return await task_submission_repository.create(
+    submission = await task_submission_repository.create(
         db,
         task_id=task_id,
         user_id=current.id,
@@ -139,6 +142,27 @@ async def submit_task(
         original_filename=original_filename,
         mime_type="application/pdf",
     )
+    await db.commit()
+
+    if current.role == "student":
+        from app.services.certificate_lifecycle import certificate_lifecycle
+
+        lesson = await db.execute(select(Lesson).where(Lesson.id == task.lesson_id))
+        lesson = lesson.scalar_one_or_none()
+        if lesson:
+            mod = await module_repository.get_by_id(db, lesson.module_id)
+            if mod:
+                try:
+                    await certificate_lifecycle.maybe_issue_pending(
+                        db, user_id=current.id, course_id=mod.course_id
+                    )
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    logger.exception("Error emitiendo certificado pendiente — user=%s, course=%s",
+                                    current.id, mod.course_id)
+
+    return submission
 
 
 @router.get(

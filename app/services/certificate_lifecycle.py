@@ -330,6 +330,120 @@ class CertificateLifecycleService:
             logger.info("Certificados reproducidos — student_id=%s, count=%s", student_id, count)
         return count
 
+    async def is_course_completed(self, db: AsyncSession, user_id: int, course_id: int) -> bool:
+        """True si el estudiante completó el curso al 100%.
+
+        Regla: todos los módulos deben estar completos. Un módulo está completo si
+        (no tiene evaluación o la aprobó) Y (no tiene tareas o las entregó todas).
+        """
+        from app.repositories.user_assessment_repository import user_assessment_repository
+
+        summary = await user_assessment_repository.get_course_progress(db, user_id, course_id)
+        if not summary.modules:
+            return False
+        for mod in summary.modules:
+            assessment_ok = mod.total_assessment_questions == 0 or mod.passed
+            tasks_ok = mod.total_tasks == 0 or mod.submitted_tasks == mod.total_tasks
+            if not (assessment_ok and tasks_ok):
+                return False
+        return True
+
+    async def maybe_issue_pending(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        course_id: int,
+        background_tasks=None,
+    ) -> int:
+        """Si el estudiante completó el curso, emite automáticamente las solicitudes
+        en proceso de ese curso. Devuelve cuántos certificados se emitieron."""
+        from app.repositories.pending_certificate_repository import (
+            pending_certificate_repository,
+        )
+
+        pc = await pending_certificate_repository.get_by_user_and_course(db, user_id, course_id)
+        if not pc or pc.status != "in_progress":
+            return 0
+        if not await self.is_course_completed(db, user_id, course_id):
+            return 0
+
+        course = await self._get_course(db, course_id)
+        ct_id = pc.certificate_type_id or (course.certificate_type_id if course else None)
+        if not ct_id:
+            logger.warning("Pending cert sin tipo — user=%s, course=%s", user_id, course_id)
+            return 0
+
+        admin = await self._get_system_bot_or_admin(db, pc.created_by)
+        cert = await self.issue_certificate(
+            db,
+            admin=admin,
+            user_id=user_id,
+            certificate_type_id=ct_id,
+            issued_at=pc.issued_at_override,
+            validity_extension=pc.validity_extension,
+            hours=pc.hours,
+            background_tasks=background_tasks,
+        )
+        await pending_certificate_repository.update(
+            db,
+            pc,
+            {
+                "status": "issued",
+                "issued_certificate_id": cert.id,
+                "issued_at": datetime.now(UTC),
+            },
+        )
+        logger.info("Certificado emitido automáticamente — user=%s, course=%s, cert=%s",
+                    user_id, course_id, cert.id)
+        return 1
+
+    async def issue_pending_for_user(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        background_tasks=None,
+    ) -> int:
+        """Emite automáticamente todas las solicitudes en proceso del estudiante
+        cuyos cursos estén completados. Devuelve cuántos certificados se emitieron."""
+        from app.repositories.pending_certificate_repository import (
+            pending_certificate_repository,
+        )
+
+        pending_list = await pending_certificate_repository.list_by_user(db, user_id)
+        issued = 0
+        for pc in pending_list:
+            if pc.status != "in_progress":
+                continue
+            issued += await self.maybe_issue_pending(
+                db, user_id=user_id, course_id=pc.course_id, background_tasks=background_tasks
+            )
+        return issued
+
+    async def _get_course(self, db: AsyncSession, course_id: int):
+        from sqlalchemy import select
+        from app.models.course import Course
+
+        r = await db.execute(select(Course).where(Course.id == course_id))
+        return r.scalar_one_or_none()
+
+    async def _get_system_bot_or_admin(self, db: AsyncSession, admin_id: int | None) -> User:
+        """Devuelve el usuario que creó la solicitud si sigue siendo admin/superuser,
+        o el system bot como respaldo."""
+        settings = get_settings()
+        system_bot = await user_repository.get_by_email(db, settings.system_bot_user_email)
+        if admin_id is not None:
+            admin = await user_repository.get_by_id(db, admin_id)
+            if admin and admin.role in (UserRole.superuser.value, UserRole.admin.value):
+                return admin
+        if system_bot:
+            return system_bot
+        superusers = await user_repository.list(db, role=UserRole.superuser, limit=1)
+        if superusers:
+            return superusers[0]
+        raise ValueError("No hay un administrador para emitir el certificado")
+
     async def update_certificate_fields(
         self,
         db: AsyncSession,

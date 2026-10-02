@@ -24,6 +24,7 @@ from app.models.task_submission import TaskSubmission
 from app.models.lesson import Lesson
 from app.models.module import Module
 from app.models.module_assessment import ModuleAssessment
+from app.models.pending_certificate import PendingCertificate
 from app.models.progress import UserProgress
 from app.models.user import User
 from app.models.user_assessment_attempt import UserAssessmentAnswer, UserAssessmentAttempt
@@ -51,6 +52,7 @@ __all__ = [
     "TaskSubmission",
     "Module",
     "ModuleAssessment",
+    "PendingCertificate",
     "User",
     "UserAssessmentAnswer",
     "UserAssessmentAttempt",

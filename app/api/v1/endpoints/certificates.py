@@ -17,6 +17,7 @@ from app.core.settings import get_settings
 from app.models.enums import CertificateStatus, UserRole
 from app.models.user import User
 from app.repositories.certificate_repository import certificate_repository
+from app.repositories.pending_certificate_repository import pending_certificate_repository
 from app.repositories.user_repository import user_repository
 from app.schemas.certificate import (
     CertificateBatchIssueRequest,
@@ -28,6 +29,7 @@ from app.schemas.certificate import (
     CertificateSearchResult,
     CertificateUpdate,
 )
+from app.schemas.pending_certificate import PendingCertificateCreate, PendingCertificateRead
 from app.services.access import is_super_or_admin
 from app.services.certificate_lifecycle import certificate_lifecycle
 from app.utils.minio_client import get_minio_client
@@ -161,6 +163,147 @@ async def view_certificate_qr_public(request: Request, certificate_uuid: UUID) -
             "Cache-Control": "public, max-age=86400",
         },
     )
+
+
+@router.get("/pending", response_model=list[PendingCertificateRead])
+async def list_pending_certificates(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+    user_id: Annotated[int | None, Query()] = None,
+) -> object:
+    """Lista solicitudes en proceso. Admin: todas (o filtradas por user_id).
+    Estudiante: solo las propias."""
+    if current.role == UserRole.student.value:
+        return list(await pending_certificate_repository.list_by_user(db, current.id))
+    if not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
+    if user_id is not None:
+        return list(await pending_certificate_repository.list_by_user(db, user_id))
+    return list(await pending_certificate_repository.list_by_user(db))
+
+
+@router.post("/pending", response_model=PendingCertificateRead, status_code=status.HTTP_201_CREATED)
+async def create_pending_certificate(
+    body: PendingCertificateCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> object:
+    """Registra un certificado en proceso para (estudiante, curso). Se emitirá
+    automáticamente cuando el estudiante complete el curso al 100%."""
+    if not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
+
+    student = await user_repository.get_by_id(db, body.user_id)
+    if not student or student.role != UserRole.student.value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El usuario destino debe ser estudiante")
+
+    from app.models.course import Course, CourseEnrollment
+    from sqlalchemy import select
+
+    r = await db.execute(select(Course).where(Course.id == body.course_id))
+    course = r.scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curso no encontrado")
+
+    if not course.certificate_type_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El curso no tiene tipo de certificado asociado",
+        )
+
+    enrolled = await db.execute(
+        select(CourseEnrollment).where(
+            CourseEnrollment.course_id == body.course_id,
+            CourseEnrollment.user_id == body.user_id,
+        )
+    )
+    if enrolled.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El estudiante no está inscrito en este curso",
+        )
+
+    existing = await pending_certificate_repository.get_by_user_and_course(db, body.user_id, body.course_id)
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe un certificado en proceso para este estudiante y curso")
+
+    pc = await pending_certificate_repository.create(
+        db,
+        user_id=body.user_id,
+        course_id=body.course_id,
+        certificate_type_id=course.certificate_type_id,
+        created_by=current.id,
+        issued_at_override=body.issued_at,
+        validity_extension=body.validity_extension,
+        hours=body.hours,
+    )
+    await db.commit()
+    return pc
+
+
+@router.delete("/pending/{pending_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pending_certificate(
+    pending_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> None:
+    """Cancela una solicitud de certificado en proceso."""
+    if not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
+    pc = await pending_certificate_repository.get_by_id(db, pending_id)
+    if not pc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Solicitud no encontrada")
+    if pc.status == "issued":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La solicitud ya fue emitida")
+    await db.delete(pc)
+    await db.commit()
+
+
+@router.post("/pending/{pending_id}/force-issue", response_model=CertificateRead)
+async def force_issue_pending_certificate(
+    pending_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+    background_tasks: BackgroundTasks,
+) -> object:
+    """Emitir manualmente una solicitud en proceso sin esperar el 100%."""
+    if not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
+    pc = await pending_certificate_repository.get_by_id(db, pending_id)
+    if not pc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Solicitud no encontrada")
+    if pc.status == "issued":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La solicitud ya fue emitida")
+    if pc.certificate_type_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El curso no tiene tipo de certificado asociado")
+    try:
+        cert = await certificate_lifecycle.issue_certificate(
+            db,
+            admin=current,
+            user_id=pc.user_id,
+            certificate_type_id=pc.certificate_type_id,
+            issued_at=pc.issued_at_override,
+            validity_extension=pc.validity_extension,
+            hours=pc.hours,
+            background_tasks=background_tasks,
+        )
+        await pending_certificate_repository.update(
+            db,
+            pc,
+            {
+                "status": "issued",
+                "issued_certificate_id": cert.id,
+                "issued_at": cert.issued_at,
+            },
+        )
+        await db.commit()
+        return cert
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 
 
 @router.get("/{certificate_id}", response_model=CertificateRead)
