@@ -30,7 +30,7 @@ class Course(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('draft', 'published', 'archived')",
-            name="ck_courses_status",
+            name="status",
         ),
     )
 

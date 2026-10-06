@@ -34,7 +34,7 @@ class PendingCertificate(Base):
         UniqueConstraint("user_id", "course_id", name="uq_pending_user_course"),
         CheckConstraint(
             "status IN ('in_progress', 'issued')",
-            name="ck_pending_certificates_status",
+            name="status",
         ),
     )
 

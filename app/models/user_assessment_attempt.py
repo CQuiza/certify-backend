@@ -50,7 +50,12 @@ class UserAssessmentAttempt(Base):
 
 class UserAssessmentAnswer(Base):
     __tablename__ = "user_assessment_answers"
-    __table_args__ = (UniqueConstraint("attempt_id", "question_id"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id", "question_id",
+            name="user_assessment_answers_attempt_id_question_id_key",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     attempt_id: Mapped[int] = mapped_column(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer
+from sqlalchemy import ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -17,10 +17,13 @@ if TYPE_CHECKING:
 
 class ModuleAssessment(Base):
     __tablename__ = "module_assessments"
+    __table_args__ = (
+        UniqueConstraint("module_id", name="module_assessments_module_id_key"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     module_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("modules.id", ondelete="CASCADE"), unique=True
+        Integer, ForeignKey("modules.id", ondelete="CASCADE")
     )
     passing_score: Mapped[int] = mapped_column(Integer, default=70)
 

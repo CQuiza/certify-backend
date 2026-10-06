@@ -1,4 +1,16 @@
 services:
+  migrate:
+    build: .
+    command: alembic upgrade head
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./app:/src/app
+      - ./alembic:/src/alembic
+      - ./alembic.ini:/src/alembic.ini
+    env_file:
+      - .env
+
   api:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -10,6 +22,9 @@ services:
       - ./app:/src/app
     env_file:
       - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   celery-worker:
     build: .
@@ -20,6 +35,9 @@ services:
       - ./app:/src/app
     env_file:
       - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   celery-beat:
     build: .
@@ -30,3 +48,6 @@ services:
       - ./app:/src/app
     env_file:
       - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully

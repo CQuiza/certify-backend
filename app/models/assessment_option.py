@@ -15,7 +15,12 @@ if TYPE_CHECKING:
 
 class AssessmentOption(Base):
     __tablename__ = "assessment_options"
-    __table_args__ = (UniqueConstraint("question_id", "option_text"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "question_id", "option_text",
+            name="assessment_options_question_id_option_text_key",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     question_id: Mapped[int] = mapped_column(

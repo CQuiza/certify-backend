@@ -1,151 +1,303 @@
--- Tabla de usuarios con roles (admin, teacher, student)
+-- ============================================================
+-- Esquema de referencia de Certify (alineado al ORM / producción).
+-- Fuente: dump de producción 2026-10-05 (dump-certify-202610051832.sql).
+-- La fuente canónica versionada es Alembic: alembic/versions/0001_baseline.py
+-- Generado desde los modelos SQLAlchemy (Base.metadata).
+-- ============================================================
+
+CREATE TABLE email_audit (
+	id SERIAL NOT NULL, 
+	user_name VARCHAR(255), 
+	email_to VARCHAR(255) NOT NULL, 
+	email_type VARCHAR(50) NOT NULL, 
+	status VARCHAR(20) NOT NULL, 
+	error TEXT, 
+	metadata JSONB, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	sent_at TIMESTAMP WITH TIME ZONE, 
+	CONSTRAINT pk_email_audit PRIMARY KEY (id)
+);
+
 CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL, -- actualizable
-    password_hash VARCHAR(255) NOT NULL, -- actualizable
-    name VARCHAR(255) NOT NULL, -- actualizable
-    first_last_name VARCHAR(255) NOT NULL, -- actualizable
-    second_last_name VARCHAR(255), -- actualizable
-    role VARCHAR(50) CHECK (role IN ('superuser', 'admin', 'teacher', 'student')) NOT NULL, -- actualizable
-    identity_type VARCHAR(50) CHECK (identity_type IN ('CC', 'TI', 'OTHER')) NOT NULL, -- actualizable
-    identity_number VARCHAR(50) UNIQUE NOT NULL,    -- actualizable
-    phone_number VARCHAR(20) UNIQUE NOT NULL, -- actualizable
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE -- actualizable
+	id SERIAL NOT NULL, 
+	email VARCHAR(255) NOT NULL, 
+	password_hash VARCHAR(255) NOT NULL, 
+	name VARCHAR(255) NOT NULL, 
+	first_last_name VARCHAR(255) NOT NULL, 
+	second_last_name VARCHAR(255), 
+	role VARCHAR(50) NOT NULL, 
+	identity_type VARCHAR(50) NOT NULL, 
+	identity_number VARCHAR(50) NOT NULL, 
+	phone_number VARCHAR(20) NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	is_active BOOLEAN DEFAULT 'true' NOT NULL, 
+	refresh_token_hash TEXT, 
+	refresh_token_expires_at TIMESTAMP WITH TIME ZONE, 
+	failed_login_attempts INTEGER NOT NULL, 
+	locked_until TIMESTAMP WITH TIME ZONE, 
+	CONSTRAINT pk_users PRIMARY KEY (id), 
+	CONSTRAINT ck_users_role CHECK (role IN ('superuser', 'admin', 'teacher', 'student')), 
+	CONSTRAINT ck_users_identity_type CHECK (identity_type IN ('CC', 'TI', 'CE', 'PPT', 'PASSPORT', 'OTHER')), 
+	CONSTRAINT users_email_key UNIQUE (email), 
+	CONSTRAINT users_identity_number_key UNIQUE (identity_number), 
+	CONSTRAINT users_phone_number_key UNIQUE (phone_number)
 );
 
--- Cursos (creados por docentes)
-CREATE TABLE courses (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL, -- actualizable
-    description TEXT, -- actualizable
-    certificate_type_id INTEGER REFERENCES certificate_types(id), -- actualizable
-    teacher_id INTEGER REFERENCES users(id) ON DELETE SET NULL, -- actualizable
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')) -- actualizable
+CREATE TABLE worker_audit (
+	id SERIAL NOT NULL, 
+	task_name VARCHAR(100) NOT NULL, 
+	status VARCHAR(20) NOT NULL, 
+	started_at TIMESTAMP WITH TIME ZONE, 
+	finished_at TIMESTAMP WITH TIME ZONE, 
+	details TEXT, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_worker_audit PRIMARY KEY (id)
 );
 
--- Módulos dentro de un curso
-CREATE TABLE modules (
-    id SERIAL PRIMARY KEY,
-    course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
-    title VARCHAR(255) NOT NULL, -- actualizable
-    order_index INTEGER NOT NULL, -- actualizable
-    UNIQUE(course_id, order_index)
-);
-
--- Lecciones (multimedia: texto, imagen, video)
-CREATE TABLE lessons (
-    id SERIAL PRIMARY KEY,
-    module_id INTEGER REFERENCES modules(id) ON DELETE CASCADE,
-    title VARCHAR(255) NOT NULL, -- actualizable
-    text_content TEXT, -- actualizable
-    image_content_url TEXT, -- actualizable
-    video_content_url TEXT, -- actualizable
-    file_content_url TEXT, -- actualizable
-    order_index INTEGER NOT NULL, -- actualizable
-    UNIQUE(module_id, order_index)
-);
-
--- Progreso del estudiante por lección
-CREATE TABLE user_progress (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    lesson_id INTEGER REFERENCES lessons(id) ON DELETE CASCADE,
-    completed BOOLEAN DEFAULT FALSE, -- actualizable
-    completed_at TIMESTAMP, -- actualizable
-    UNIQUE(user_id, lesson_id)
-);
-
--- Tipos de certificado (configurables por admin); el curso referencia el tipo (certificate_types.course_id eliminado)
 CREATE TABLE certificate_types (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL, -- actualizable
-    reference TEXT, -- actualizable
-    type VARCHAR(20) CHECK (type IN ('basic', 'advanced', 'diploma')) NOT NULL, -- actualizable
-    hours INTEGER NOT NULL, -- actualizable
-    validity_type VARCHAR(50) CHECK (validity_type IN ('years', 'months', 'days')) NOT NULL, -- actualizable
-    validity_value INTEGER NOT NULL,  -- número de unidades de tiempo de validez desde emisión (actualizable)
-    created_by INTEGER REFERENCES users(id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	id SERIAL NOT NULL, 
+	name VARCHAR(255) NOT NULL, 
+	reference TEXT, 
+	type VARCHAR(20) NOT NULL, 
+	hours INTEGER NOT NULL, 
+	validity_type VARCHAR(50) NOT NULL, 
+	validity_value INTEGER NOT NULL, 
+	created_by INTEGER, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_certificate_types PRIMARY KEY (id), 
+	CONSTRAINT ck_certificate_types_type CHECK (type IN ('basic', 'advanced', 'diploma')), 
+	CONSTRAINT ck_certificate_types_validity_type CHECK (validity_type IN ('years', 'months', 'days')), 
+	CONSTRAINT fk_certificate_types_created_by_users FOREIGN KEY(created_by) REFERENCES users (id)
 );
 
--- Certificados emitidos
+CREATE TABLE courses (
+	id SERIAL NOT NULL, 
+	title VARCHAR(255) NOT NULL, 
+	description TEXT, 
+	certificate_type_id INTEGER, 
+	teacher_id INTEGER, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	status VARCHAR(20) DEFAULT 'draft' NOT NULL, 
+	CONSTRAINT pk_courses PRIMARY KEY (id), 
+	CONSTRAINT ck_courses_status CHECK (status IN ('draft', 'published', 'archived')), 
+	CONSTRAINT fk_courses_teacher_id_users FOREIGN KEY(teacher_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE TABLE user_audit (
+	id SERIAL NOT NULL, 
+	user_id INTEGER, 
+	deleted_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	deleted_by INTEGER, 
+	snapshot JSONB NOT NULL, 
+	CONSTRAINT pk_user_audit PRIMARY KEY (id), 
+	CONSTRAINT fk_user_audit_deleted_by_users FOREIGN KEY(deleted_by) REFERENCES users (id) ON DELETE SET NULL
+);
+
 CREATE TABLE certificates (
-    id SERIAL PRIMARY KEY,
-    unique_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
-    certificate_type_id INTEGER REFERENCES certificate_types(id),
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP,            -- calculado automáticamente
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'expired')), -- actualizable
-    qr_code_url VARCHAR(255),        -- ruta al QR generado
-    pdf_url VARCHAR(255),            -- ruta al PDF base (sin marca)
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	id SERIAL NOT NULL, 
+	unique_id UUID DEFAULT gen_random_uuid() NOT NULL, 
+	certificate_type_id INTEGER, 
+	user_id INTEGER, 
+	issued_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	expires_at TIMESTAMP WITH TIME ZONE, 
+	hours INTEGER, 
+	validity_years INTEGER, 
+	status VARCHAR(20) DEFAULT 'active' NOT NULL, 
+	qr_code_url VARCHAR(255), 
+	pdf_url VARCHAR(255), 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_certificates PRIMARY KEY (id), 
+	CONSTRAINT ck_certificates_status CHECK (status IN ('active', 'revoked', 'expired')), 
+	CONSTRAINT certificates_unique_id_key UNIQUE (unique_id), 
+	CONSTRAINT fk_certificates_certificate_type_id_certificate_types FOREIGN KEY(certificate_type_id) REFERENCES certificate_types (id), 
+	CONSTRAINT fk_certificates_user_id_users FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
--- Función y trigger para calcular expires_at al insertar
-CREATE OR REPLACE FUNCTION set_expires_at() RETURNS TRIGGER AS $$
-BEGIN
-    NEW.expires_at := NEW.issued_at + (SELECT validity_years FROM certificate_types WHERE id = NEW.certificate_type_id) * INTERVAL '1 year';
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+COMMENT ON COLUMN certificates.hours IS 'Override de intensidad horaria (NULL = sigue el tipo)';
 
-CREATE TRIGGER before_insert_certificate
-BEFORE INSERT ON certificates
-FOR EACH ROW
-EXECUTE FUNCTION set_expires_at();
+COMMENT ON COLUMN certificates.validity_years IS 'Override de vigencia en años (NULL = sigue el tipo)';
 
--- Auditoría de cambios en certificados
-CREATE TABLE certificate_audit (
-    id SERIAL PRIMARY KEY,
-    certificate_id INTEGER REFERENCES certificates(id),
-    certificate_unique_id UUID,
-    action VARCHAR(50),            -- issued, edited, revoked, deleted
-    performed_by INTEGER REFERENCES users(id),
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Índices para rendimiento
-CREATE INDEX idx_users_role ON users(role);
-CREATE INDEX idx_courses_teacher ON courses(teacher_id);
-CREATE INDEX idx_user_progress_user ON user_progress(user_id);
-CREATE INDEX idx_certificates_user ON certificates(user_id);
-CREATE INDEX idx_certificates_unique_id ON certificates(unique_id);
-CREATE INDEX idx_certificates_status_expires ON certificates(status, expires_at);
-
--- FK circular courses/certificate_types resuelta: solo courses.certificate_type_id → certificate_types
 CREATE TABLE course_enrollments (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-    enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, course_id)
-);
-CREATE INDEX idx_enrollments_user ON course_enrollments(user_id);
-CREATE INDEX idx_enrollments_course ON course_enrollments(course_id);
-
-
-
-CREATE TABLE IF NOT EXISTS worker_audit (
-    id          INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    task_name   VARCHAR(100) NOT NULL,
-    status      VARCHAR(20) NOT NULL,
-    started_at  TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ,
-    details     TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+	id SERIAL NOT NULL, 
+	user_id INTEGER NOT NULL, 
+	course_id INTEGER NOT NULL, 
+	enrolled_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_course_enrollments PRIMARY KEY (id), 
+	CONSTRAINT uq_enrollment_user_course UNIQUE (user_id, course_id), 
+	CONSTRAINT fk_course_enrollments_user_id_users FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_course_enrollments_course_id_courses FOREIGN KEY(course_id) REFERENCES courses (id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_worker_audit_task_name
-    ON worker_audit (task_name);
+CREATE TABLE modules (
+	id SERIAL NOT NULL, 
+	course_id INTEGER NOT NULL, 
+	title VARCHAR(255) NOT NULL, 
+	order_index INTEGER NOT NULL, 
+	CONSTRAINT pk_modules PRIMARY KEY (id), 
+	CONSTRAINT uq_module_course_order UNIQUE (course_id, order_index), 
+	CONSTRAINT fk_modules_course_id_courses FOREIGN KEY(course_id) REFERENCES courses (id) ON DELETE CASCADE
+);
 
-CREATE INDEX IF NOT EXISTS idx_worker_audit_status
-    ON worker_audit (status);
+CREATE TABLE certificate_audit (
+	id SERIAL NOT NULL, 
+	certificate_id INTEGER, 
+	certificate_unique_id UUID, 
+	action VARCHAR(50), 
+	performed_by INTEGER, 
+	timestamp TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_certificate_audit PRIMARY KEY (id), 
+	CONSTRAINT fk_certificate_audit_certificate_id_certificates FOREIGN KEY(certificate_id) REFERENCES certificates (id) ON DELETE SET NULL, 
+	CONSTRAINT fk_certificate_audit_performed_by_users FOREIGN KEY(performed_by) REFERENCES users (id)
+);
 
-CREATE INDEX IF NOT EXISTS idx_worker_audit_created_at
-    ON worker_audit (created_at);
+CREATE TABLE lessons (
+	id SERIAL NOT NULL, 
+	module_id INTEGER NOT NULL, 
+	title VARCHAR(255) NOT NULL, 
+	text_content TEXT, 
+	image_content_url TEXT, 
+	video_content_url TEXT, 
+	file_content_url TEXT, 
+	order_index INTEGER NOT NULL, 
+	CONSTRAINT pk_lessons PRIMARY KEY (id), 
+	CONSTRAINT uq_lesson_module_order UNIQUE (module_id, order_index), 
+	CONSTRAINT fk_lessons_module_id_modules FOREIGN KEY(module_id) REFERENCES modules (id) ON DELETE CASCADE
+);
+
+CREATE TABLE module_assessments (
+	id SERIAL NOT NULL, 
+	module_id INTEGER NOT NULL, 
+	passing_score INTEGER NOT NULL, 
+	CONSTRAINT pk_module_assessments PRIMARY KEY (id), 
+	CONSTRAINT module_assessments_module_id_key UNIQUE (module_id), 
+	CONSTRAINT fk_module_assessments_module_id_modules FOREIGN KEY(module_id) REFERENCES modules (id) ON DELETE CASCADE
+);
+
+CREATE TABLE pending_certificates (
+	id SERIAL NOT NULL, 
+	user_id INTEGER NOT NULL, 
+	course_id INTEGER NOT NULL, 
+	certificate_type_id INTEGER, 
+	status VARCHAR(20) DEFAULT 'in_progress' NOT NULL, 
+	created_by INTEGER, 
+	issued_at_override TIMESTAMP WITH TIME ZONE, 
+	validity_extension INTEGER, 
+	hours INTEGER, 
+	issued_certificate_id INTEGER, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	issued_at TIMESTAMP WITH TIME ZONE, 
+	CONSTRAINT pk_pending_certificates PRIMARY KEY (id), 
+	CONSTRAINT uq_pending_user_course UNIQUE (user_id, course_id), 
+	CONSTRAINT ck_pending_certificates_status CHECK (status IN ('in_progress', 'issued')), 
+	CONSTRAINT fk_pending_certificates_user_id_users FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_pending_certificates_course_id_courses FOREIGN KEY(course_id) REFERENCES courses (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_pending_certificates_certificate_type_id_certificate_types FOREIGN KEY(certificate_type_id) REFERENCES certificate_types (id), 
+	CONSTRAINT fk_pending_certificates_created_by_users FOREIGN KEY(created_by) REFERENCES users (id) ON DELETE SET NULL, 
+	CONSTRAINT fk_pending_certificates_issued_certificate_id_certificates FOREIGN KEY(issued_certificate_id) REFERENCES certificates (id) ON DELETE SET NULL
+);
+
+CREATE TABLE assessment_questions (
+	id SERIAL NOT NULL, 
+	assessment_id INTEGER NOT NULL, 
+	question_text TEXT NOT NULL, 
+	question_type VARCHAR(20) NOT NULL, 
+	points INTEGER NOT NULL, 
+	order_index INTEGER NOT NULL, 
+	CONSTRAINT pk_assessment_questions PRIMARY KEY (id), 
+	CONSTRAINT fk_assessment_questions_assessment_id_module_assessments FOREIGN KEY(assessment_id) REFERENCES module_assessments (id) ON DELETE CASCADE
+);
+
+CREATE TABLE lesson_files (
+	id SERIAL NOT NULL, 
+	lesson_id INTEGER NOT NULL, 
+	original_filename VARCHAR(255), 
+	mime_type VARCHAR(100), 
+	file_url TEXT, 
+	order_index INTEGER NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_lesson_files PRIMARY KEY (id), 
+	CONSTRAINT fk_lesson_files_lesson_id_lessons FOREIGN KEY(lesson_id) REFERENCES lessons (id) ON DELETE CASCADE
+);
+
+CREATE TABLE lesson_tasks (
+	id SERIAL NOT NULL, 
+	lesson_id INTEGER NOT NULL, 
+	title VARCHAR(255) NOT NULL, 
+	description TEXT, 
+	original_filename VARCHAR(255), 
+	file_type VARCHAR(20) DEFAULT 'none' NOT NULL, 
+	file_url TEXT, 
+	google_drive_link TEXT, 
+	order_index INTEGER NOT NULL, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_lesson_tasks PRIMARY KEY (id), 
+	CONSTRAINT fk_lesson_tasks_lesson_id_lessons FOREIGN KEY(lesson_id) REFERENCES lessons (id) ON DELETE CASCADE
+);
+
+CREATE TABLE user_progress (
+	id SERIAL NOT NULL, 
+	user_id INTEGER NOT NULL, 
+	lesson_id INTEGER NOT NULL, 
+	completed BOOLEAN DEFAULT 'false' NOT NULL, 
+	completed_at TIMESTAMP WITH TIME ZONE, 
+	CONSTRAINT pk_user_progress PRIMARY KEY (id), 
+	CONSTRAINT uq_progress_user_lesson UNIQUE (user_id, lesson_id), 
+	CONSTRAINT fk_user_progress_user_id_users FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_user_progress_lesson_id_lessons FOREIGN KEY(lesson_id) REFERENCES lessons (id) ON DELETE CASCADE
+);
+
+CREATE TABLE user_assessment_attempts (
+	id SERIAL NOT NULL, 
+	assessment_id INTEGER NOT NULL, 
+	user_id INTEGER NOT NULL, 
+	score NUMERIC(5, 2) NOT NULL, 
+	passed BOOLEAN NOT NULL, 
+	started_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	finished_at TIMESTAMP WITH TIME ZONE, 
+	CONSTRAINT pk_user_assessment_attempts PRIMARY KEY (id), 
+	CONSTRAINT fk_user_assessment_attempts_assessment_id_module_assessments FOREIGN KEY(assessment_id) REFERENCES module_assessments (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_user_assessment_attempts_user_id_users FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE assessment_options (
+	id SERIAL NOT NULL, 
+	question_id INTEGER NOT NULL, 
+	option_text VARCHAR(255) NOT NULL, 
+	is_correct BOOLEAN NOT NULL, 
+	CONSTRAINT pk_assessment_options PRIMARY KEY (id), 
+	CONSTRAINT assessment_options_question_id_option_text_key UNIQUE (question_id, option_text), 
+	CONSTRAINT fk_assessment_options_question_id_assessment_questions FOREIGN KEY(question_id) REFERENCES assessment_questions (id) ON DELETE CASCADE
+);
+
+CREATE TABLE task_submissions (
+	id SERIAL NOT NULL, 
+	task_id INTEGER NOT NULL, 
+	user_id INTEGER NOT NULL, 
+	file_url TEXT NOT NULL, 
+	original_filename VARCHAR(255) NOT NULL, 
+	mime_type VARCHAR(127) DEFAULT 'application/pdf' NOT NULL, 
+	submitted_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_task_submissions PRIMARY KEY (id), 
+	CONSTRAINT _task_user_uc UNIQUE (task_id, user_id), 
+	CONSTRAINT fk_task_submissions_task_id_lesson_tasks FOREIGN KEY(task_id) REFERENCES lesson_tasks (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_task_submissions_user_id_users FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE user_assessment_answers (
+	id SERIAL NOT NULL, 
+	attempt_id INTEGER NOT NULL, 
+	question_id INTEGER NOT NULL, 
+	selected_option_id INTEGER NOT NULL, 
+	is_correct BOOLEAN NOT NULL, 
+	CONSTRAINT pk_user_assessment_answers PRIMARY KEY (id), 
+	CONSTRAINT user_assessment_answers_attempt_id_question_id_key UNIQUE (attempt_id, question_id), 
+	CONSTRAINT fk_user_assessment_answers_attempt_id_user_assessment_attempts FOREIGN KEY(attempt_id) REFERENCES user_assessment_attempts (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_user_assessment_answers_question_id_assessment_questions FOREIGN KEY(question_id) REFERENCES assessment_questions (id) ON DELETE CASCADE, 
+	CONSTRAINT fk_user_assessment_answers_selected_option_id_assessmen_2000 FOREIGN KEY(selected_option_id) REFERENCES assessment_options (id) ON DELETE CASCADE
+);
+
+ALTER TABLE courses ADD CONSTRAINT fk_courses_certificate_type_id_certificate_types FOREIGN KEY(certificate_type_id) REFERENCES certificate_types (id);

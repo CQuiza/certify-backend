@@ -146,8 +146,12 @@ async def _seed_system_bot() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await create_database_if_not_exists()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    if get_settings().auto_create_tables:
+        # Solo para entornos de desarrollo/pruebas. En producción el esquema
+        # se gestiona con Alembic (`alembic upgrade head`).
+        logger.warning("AUTO_CREATE_TABLES activo: creando tablas desde los modelos.")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
     await _seed_superuser()
     await _seed_system_bot()
     yield

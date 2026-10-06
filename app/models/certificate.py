@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -30,14 +31,14 @@ class Certificate(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('active', 'revoked', 'expired')",
-            name="ck_certificates_status",
+            name="status",
         ),
+        UniqueConstraint("unique_id", name="certificates_unique_id_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     unique_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
-        unique=True,
         nullable=False,
         server_default=func.gen_random_uuid(),
     )

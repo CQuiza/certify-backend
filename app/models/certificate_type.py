@@ -29,11 +29,11 @@ class CertificateType(Base):
     __table_args__ = (
         CheckConstraint(
             "type IN ('basic', 'advanced', 'diploma')",
-            name="ck_certificate_types_type",
+            name="type",
         ),
         CheckConstraint(
             "validity_type IN ('years', 'months', 'days')",
-            name="ck_certificate_types_validity_type",
+            name="validity_type",
         ),
     )
 

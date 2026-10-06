@@ -100,6 +100,7 @@ class Settings(BaseSettings):
         alias="ENVIRONMENT",
     )
     debug: bool = Field(default=False, alias="DEBUG")
+    auto_create_tables: bool = Field(default=False, alias="AUTO_CREATE_TABLES")
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
