@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     lessons,
     module_assessments,
     modules,
+    monitoring,
     tasks,
     task_submissions,
     user_audit,
@@ -41,6 +42,7 @@ api_router.include_router(certificates.router)
 api_router.include_router(certificate_audit.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(configuration.router)
+api_router.include_router(monitoring.router)
 api_router.include_router(course_enrollments.router)
 api_router.include_router(email_audit.router)
 api_router.include_router(tasks.router)

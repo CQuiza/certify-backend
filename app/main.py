@@ -2,6 +2,8 @@
 
 import logging
 import secrets
+import traceback
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -15,6 +17,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.core.rate_limit import limiter
 
 from app.core.database import AsyncSessionLocal, Base, engine
+from app.core.logging_config import configure_logging, request_id_var
 from app.core.security import get_password_hash
 from app.core.settings import get_settings
 from app.api.v1.router import api_router
@@ -31,12 +34,10 @@ from app.models import (  # noqa: F401 — registra metadatos
     UserProgress,
     WorkerAudit,
 )
+from app.models.system_log import SystemLog  # noqa: F401 — registra metadatos
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+configure_logging()
+
 logger = logging.getLogger(__name__)
 
 
@@ -201,6 +202,50 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "0"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Cache-Control"] = "no-cache, private"
+    return response
+
+
+async def _record_api_error(request: Request, request_id: str, exc: Exception | None, status_code: int) -> None:
+    """Persiste en system_logs un error de la API. Silencioso."""
+    from app.services.system_log_service import write_system_log
+
+    stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)) if exc else None
+    await write_system_log(
+        level="error",
+        source="api",
+        event=f"{request.method} {request.url.path}",
+        detail=str(exc) if exc else f"HTTP {status_code}",
+        stacktrace=stack,
+        request_id=request_id,
+        path=request.url.path,
+        method=request.method,
+        status_code=status_code,
+    )
+
+
+@app.middleware("http")
+async def request_context_and_errors(request: Request, call_next):
+    """Asigna un request_id, propaga el contexto y captura errores 500."""
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    token = request_id_var.set(request_id)
+    is_health = request.url.path.rstrip("/").endswith("/health")
+    try:
+        try:
+            response = await call_next(request)
+        except Exception as exc:  # noqa: BLE001 — capturamos para registrar y devolver 500
+            logger.exception("Error no manejado en %s %s", request.method, request.url.path)
+            if not is_health:
+                await _record_api_error(request, request_id, exc, status_code=500)
+            response = JSONResponse(
+                status_code=500,
+                content={"detail": "Error interno del servidor", "request_id": request_id},
+            )
+        else:
+            if response.status_code >= 500 and not is_health:
+                await _record_api_error(request, request_id, None, status_code=response.status_code)
+    finally:
+        request_id_var.reset(token)
+    response.headers["X-Request-ID"] = request_id
     return response
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
