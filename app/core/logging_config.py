@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from contextvars import ContextVar
 
 # Identificador de la petición actual (se propaga a los logs).
@@ -22,10 +24,40 @@ _LOG_FORMAT = (
 )
 
 
-def configure_logging(level: int = logging.INFO) -> None:
-    """Configura el logging raíz con el formato de la app y el request_id."""
+class JsonFormatter(logging.Formatter):
+    """Emite registros en una línea JSON (ideal para Loki/agregadores)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "level": record.levelname.lower(),
+            "logger": record.name,
+            "line": record.lineno,
+            "request_id": getattr(record, "request_id", None) or "-",
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        extra = getattr(record, "_log_extra", None)
+        if isinstance(extra, dict):
+            payload.update(extra)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def configure_logging(level: int = logging.INFO, log_format: str | None = None) -> None:
+    """Configura el logging raíz.
+
+    ``log_format``: ``"text"`` (default) o ``"json"``. Si es ``None`` se lee la
+    variable de entorno ``LOG_FORMAT``.
+    """
+    fmt = (log_format or os.getenv("LOG_FORMAT", "text")).lower()
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
+
+    if fmt == "json":
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
+
     handler.addFilter(RequestIdFilter())
 
     root = logging.getLogger()

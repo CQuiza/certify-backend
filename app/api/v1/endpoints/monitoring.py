@@ -12,7 +12,6 @@ from app.core.rate_limit import limiter
 from app.models.user import User
 from app.repositories.system_log_repository import system_log_repository
 from app.schemas.system_log import SystemLogCreate, SystemLogListResponse, SystemLogRead
-from app.services.access import is_super_or_admin
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +28,9 @@ async def list_system_logs(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> SystemLogListResponse:
-    """Lista los logs registrados. Solo admin/superusuario."""
-    if not is_super_or_admin(current):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
+    """Lista los logs registrados. Solo superusuario."""
+    if current.role != "superuser":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo superusuario")
     total = await system_log_repository.count(db, level=level, source=source, search=search)
     rows = await system_log_repository.list(
         db, level=level, source=source, search=search, skip=skip, limit=limit

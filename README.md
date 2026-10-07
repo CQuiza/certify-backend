@@ -140,6 +140,60 @@ alembic current
 
 A partir de ese momento, cada despliegue aplica `alembic upgrade head`.
 
+## Monitorización (logs y errores)
+
+La plataforma registra eventos/errores en la tabla **`system_logs`** (vía el
+servicio `write_system_log` y middleware de `main.py`) y los expone en
+`GET /monitoring/logs` (solo **superuser**). En el frontend se muestran en el panel
+**Monitoreo** (`/monitoring`).
+
+- **Origen** (`source`): `api`, `worker`, `frontend`.
+- **Nivel** (`level`): `debug`, `info`, `warning`, `error`, `critical`.
+- Cada petición de la API lleva un `request_id` (header `X-Request-ID`) que se
+  propaga a los logs y a `system_logs` para correlación.
+- Errores 500 de la API y errores de render del frontend se persisten
+  automáticamente.
+- Para los workers (Celery), los eventos se registran en `worker_audit`; la
+  inclusión de `worker` en `system_logs` es un follow-up.
+
+### Formato de logs (para ingestion)
+
+Por defecto los logs son texto con `rid=`. Para ingestión en Loki/Grafana se
+recomienda **JSON**: `LOG_FORMAT=json` en `.env` (ver `app/core/logging_config.py`).
+
+### Loki + Grafana
+
+Se provee un overlay **`certify-infra/docker-compose.loki.yml`** (Loki + Grafana
+sobre `proxy_network`) con:
+- `certify-infra/loki/config.yaml` (single-binary, storage filesystem, retención 30d).
+- `certify-infra/grafana/provisioning/datasources/loki.yaml` (datasource Loki + campo derivado `request_id`).
+- `gateway/conf.d/grafana.conf` (Grafana tras authentik, patrón igual a rabbitmq).
+
+Pasos para adoptarlo en el servidor:
+
+```bash
+# 1. Instalar el plugin de logging de Docker para Loki (requiere root)
+docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
+
+# 2. Levantar Loki + Grafana junto a la infra
+cd <ruta>/certify-infra
+docker compose -f docker-compose.yml -f docker-compose.loki.yml up -d
+
+# 3. Añadir la ingestión a los servicios del backend (en su compose de prod):
+#    api / celery-worker / celery-beat:
+#      logging:
+#        driver: loki
+#        options:
+#          loki-url: "http://loki:3100/loki/api/v1/push"
+#          loki-external-labels: "compose_project=certify"
+
+# 4. Copiar gateway/conf.d/grafana.conf -> /etc/nginx/conf.d/ + certificado del subdominio
+# 5. Activar LOG_FORMAT=json en el backend y redeployar
+```
+
+Grafana queda en `https://grafana.cristhianquiza.com` tras authentik; el datasource
+**Loki** está provisionado con un campo derivado para `request_id`.
+
 ## Documentación de la API
 
 Una vez que la aplicación esté corriendo, la documentación interactiva generada por FastAPI estará disponible en:
