@@ -197,6 +197,37 @@ Grafana queda en `https://grafana.cristhianquiza.com` tras authentik; el datasou
 `check_expired_certificates` y `backup_database_to_minio` registran su inicio/fin/error
 en `system_logs` con `source=worker` (ver `app/workers/tasks.py`).
 
+## Personalización de la plataforma (/configuration)
+
+Además de la plantilla de certificado, el panel `/configuration` (solo `superuser`)
+permite personalizar, gestionadas por la tabla `platform_settings` (+ `email_templates`):
+
+- **Organización / marca**: nombre de la organización, mensaje del dashboard
+  (con placeholders `{{app_name}}` y `{{organization}}`) y logo (MinIO,
+  visible solo para autenticados; las páginas públicas conservan el logo de Certify).
+- **Correo saliente (SMTP)**: host, puerto, usuario, contraseña (cifrada con
+  Fernet, clave derivada de `SECRET_KEY`), TLS, remitente; envio de prueba. Si
+  `smtp_enabled` es falso o está incompleto, se usa la configuración del `.env`.
+- **Plantillas de correo**: asunto + cuerpo HTML por tipo (`credentials`,
+  `certificate_issued`, `certificate_expired`) con placeholders `{{...}}` y el
+  logo embebido inline (`cid:logo`).
+
+Endpoints en `GET/PUT /configuration/{organization,email,email/templates}`. El
+modelo ídem está preparado para multitenancy: `platform_settings.tenant_key`
+(default `'default'`), y la resolución de config/marca pasa por tenant.
+
+## Pruebas
+
+```bash
+# Python >= 3.11 requerido (la app usa `datetime.UTC`)
+pip install -r requirements-dev.txt
+pytest
+```
+
+La suite usa SQLite (`tests/conftest.py` fija `DATABASE_URL` a
+`sqlite+aiosqlite`) para validar cifrado de secretos, rendering de placeholders,
+servicios de configuración y los endpoints con RBAC.
+
 ## Documentación de la API
 
 Una vez que la aplicación esté corriendo, la documentación interactiva generada por FastAPI estará disponible en:

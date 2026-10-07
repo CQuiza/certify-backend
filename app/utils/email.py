@@ -1,59 +1,129 @@
-"""Envío de correos electrónicos usando fastapi-mail."""
+"""Envío de correos electrónicos usando fastapi-mail.
+
+La configuración SMTP y las plantillas se resuelven desde la configuración
+personalizable de plataforma (BD) con fallback al ``.env``. Se puede adjuntar
+el logo de la organización como imagen inline (``cid:logo``).
+"""
 
 import logging
 from datetime import datetime, timezone
+from io import BytesIO
 
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema
+from starlette.datastructures import Headers, UploadFile
 
+from app.core.database import AsyncSessionLocal
 from app.core.settings import get_settings
 from app.models.enums import EmailStatus
-from app.utils.email_templates import credentials_body, expired_body, issued_body
+from app.services.email_template_service import RawHTML, email_template_service
+from app.services.platform_settings_service import EmailConfig, platform_settings_service
 
 logger = logging.getLogger(__name__)
 
-_mail_config: ConnectionConfig | None = None
+_LOGO_CID = "logo"
+_LOGO_FILENAME = "certify_logo.png"
 
 
-def _get_mail_config() -> ConnectionConfig | None:
-    global _mail_config
-    if _mail_config is not None:
-        return _mail_config
-    settings = get_settings()
-    if not settings.smtp_host:
+def build_connection_config(cfg: EmailConfig) -> ConnectionConfig | None:
+    """Construye la config de fastapi-mail para una config efectiva."""
+    if not cfg.host:
         return None
-    _mail_config = ConnectionConfig(
-        MAIL_USERNAME=settings.smtp_user,
-        MAIL_PASSWORD=settings.smtp_password,
-        MAIL_FROM=settings.email_from,
-        MAIL_PORT=settings.smtp_port,
-        MAIL_SERVER=settings.smtp_host,
-        MAIL_STARTTLS=settings.smtp_tls,
+    from_email = cfg.from_email or (cfg.user or "")
+    if not from_email:
+        return None
+    return ConnectionConfig(
+        MAIL_USERNAME=cfg.user,
+        MAIL_PASSWORD=cfg.password,
+        MAIL_FROM=from_email,
+        MAIL_FROM_NAME=cfg.from_name,
+        MAIL_PORT=cfg.port,
+        MAIL_SERVER=cfg.host,
+        MAIL_STARTTLS=cfg.tls,
         MAIL_SSL_TLS=False,
         USE_CREDENTIALS=True,
         VALIDATE_CERTS=True,
     )
-    return _mail_config
+
+
+def inline_logo_attachments(logo_bytes: bytes | None) -> list[dict]:
+    """Adjunta el logo como imagen inline referenciada por ``cid:logo``."""
+    if not logo_bytes:
+        return []
+    upload = UploadFile(
+        filename=_LOGO_FILENAME,
+        file=BytesIO(logo_bytes),
+        headers=Headers({"content-type": "image/png"}),
+    )
+    return [
+        {
+            "file": upload,
+            "mime_type": "image",
+            "mime_subtype": "png",
+            "headers": {
+                "Content-ID": f"<{_LOGO_CID}>",
+                "Content-Disposition": f'inline; filename="{_LOGO_FILENAME}"',
+            },
+        }
+    ]
+
+
+def _base_context(ctx, template_context: dict) -> dict:
+    context: dict = dict(template_context)
+    context["logo"] = ctx.logo_html
+    context["app_name"] = ctx.app_name
+    context["organization_name"] = ctx.organization_name or ctx.app_name
+    return context
+
+
+async def _dispatch(
+    kind: str,
+    recipients: list[str],
+    template_context: dict,
+    log_ref: str,
+) -> None:
+    """Resuelve config+plantilla y envía el correo del tipo dado."""
+    try:
+        async with AsyncSessionLocal() as session:
+            ctx = await platform_settings_service.get_email_context(session)
+        if ctx is None:
+            logger.warning(
+                "SMTP no configurado. No se envió correo (%s) a %s", kind, log_ref
+            )
+            return
+        template = ctx.templates.get(kind)
+        if template is None:
+            logger.warning("Plantilla '%s' no existe", kind)
+            return
+        context = _base_context(ctx, template_context)
+        subject, body = email_template_service.render(template, context)
+        conf = build_connection_config(ctx.cfg)
+        if conf is None:
+            logger.warning("SMTp sin dirección de remitente — %s a %s", kind, log_ref)
+            return
+        message = MessageSchema(
+            subject=subject,
+            recipients=recipients,
+            body=body,
+            subtype="html",
+            attachments=inline_logo_attachments(ctx.logo_bytes),
+        )
+        fm = FastMail(conf)
+        await fm.send_message(message)
+        logger.info("Correo '%s' enviado a %s", kind, log_ref)
+    except Exception:
+        logger.exception("Error enviando correo '%s' a %s", kind, log_ref)
 
 
 async def send_credentials_email(email_to: str, password: str) -> None:
     """Envía un correo con las credenciales al usuario recién creado."""
-    conf = _get_mail_config()
-    if conf is None:
-        logger.warning("SMTP no configurado. No se envió correo de credenciales a %s", email_to)
-        return
-
     settings = get_settings()
-    app_name = settings.project_name
     login_url = f"{settings.base_url.rstrip('/')}/login"
-    message = MessageSchema(
-        subject=f"Tus credenciales de acceso — {app_name}",
-        recipients=[email_to],
-        body=credentials_body(app_name, email_to, password, login_url),
-        subtype="html",
+    await _dispatch(
+        "credentials",
+        [email_to],
+        {"email": email_to, "password": password, "login_url": login_url},
+        email_to,
     )
-    fm = FastMail(conf)
-    await fm.send_message(message)
-    logger.info("Correo de credenciales enviado a %s", email_to)
 
 
 async def send_certificate_issued_email(
@@ -65,23 +135,22 @@ async def send_certificate_issued_email(
     certificate_type_name: str | None = None,
 ) -> None:
     """Envía un correo notificando la emisión de un certificado."""
-    conf = _get_mail_config()
-    if conf is None:
-        logger.warning("SMTP no configurado. No se envió correo de certificado emitido a %s", email_to)
-        return
-
-    settings = get_settings()
-    app_name = settings.project_name
     verify_link = f"{base_url.rstrip('/')}{api_prefix}/certificates/view/{certificate_uid}"
-    message = MessageSchema(
-        subject=f"Tu certificado ha sido emitido — {app_name}",
-        recipients=[email_to],
-        body=issued_body(app_name, student_name, verify_link, certificate_type_name),
-        subtype="html",
+    cert_line = ""
+    if certificate_type_name:
+        cert_line = RawHTML(
+            f"<p><strong>Certificado:</strong> {certificate_type_name}</p>"
+        )
+    await _dispatch(
+        "certificate_issued",
+        [email_to],
+        {
+            "student_name": student_name,
+            "verify_link": verify_link,
+            "certificate_type": cert_line,
+        },
+        email_to,
     )
-    fm = FastMail(conf)
-    await fm.send_message(message)
-    logger.info("Correo de certificado emitido enviado a %s", email_to)
 
 
 async def send_certificate_expired_email(
@@ -91,28 +160,52 @@ async def send_certificate_expired_email(
     base_url: str | None = None,
 ) -> None:
     """Envía un correo notificando la expiración de un certificado."""
-    conf = _get_mail_config()
-    if conf is None:
-        logger.warning("SMTP no configurado. No se envió correo de certificado expirado a %s", email_to)
-        return
-
-    settings = get_settings()
-    app_name = settings.project_name
-
-    message = MessageSchema(
-        subject=f"Tu certificado ha expirado — {app_name}",
-        recipients=[email_to],
-        body=expired_body(app_name, student_name),
-        subtype="html",
+    await _dispatch(
+        "certificate_expired",
+        [email_to],
+        {"student_name": student_name},
+        email_to,
     )
-    fm = FastMail(conf)
-    await fm.send_message(message)
-    logger.info("Correo de certificado expirado enviado a %s", email_to)
+
+
+async def send_test_email(email_to: str) -> None:
+    """Envía un correo de prueba usando la configuración SMTP efectiva."""
+    try:
+        async with AsyncSessionLocal() as session:
+            ctx = await platform_settings_service.get_email_context(session)
+        if ctx is None:
+            raise RuntimeError(
+                "No hay configuración de correo: complete SMTP o defina variables en el .env"
+            )
+        conf = build_connection_config(ctx.cfg)
+        if conf is None:
+            raise RuntimeError("La configuración SMTP está incompleta")
+        subject = f"Correo de prueba — {ctx.app_name}"
+        body = (
+            "<html><body style='font-family: Arial, sans-serif; padding: 20px;'>"
+            + ctx.logo_html
+            + "<h2>Correo de prueba</h2>"
+            + "<p>Si estás viendo este correo, la configuración SMTP "
+            + f"de <strong>{ctx.organization_name or ctx.app_name}</strong> funciona correctamente.</p>"
+            + "</body></html>"
+        )
+        message = MessageSchema(
+            subject=subject,
+            recipients=[email_to],
+            body=body,
+            subtype="html",
+            attachments=inline_logo_attachments(ctx.logo_bytes),
+        )
+        fm = FastMail(conf)
+        await fm.send_message(message)
+        logger.info("Correo de prueba enviado a %s", email_to)
+    except Exception:
+        logger.exception("Error enviando correo de prueba a %s", email_to)
+        raise
 
 
 # ── Wrappers con auditoría para BackgroundTasks ──────────────
 
-from app.core.database import AsyncSessionLocal
 from app.models.email_audit import EmailAudit
 
 

@@ -8,11 +8,13 @@ from app.models.certificate_audit import CertificateAudit
 from app.models.certificate_type import CertificateType
 from app.models.course import Course, CourseEnrollment
 from app.models.email_audit import EmailAudit
+from app.models.email_template import EmailTemplate
 from app.models.enums import (
     CertificateAuditAction,
     CertificateStatus,
     CertificateTypeKind,
     CourseStatus,
+    EmailTemplateKind,
     IdentityType,
     UserRole,
     ValidityUnit,
@@ -25,6 +27,7 @@ from app.models.lesson import Lesson
 from app.models.module import Module
 from app.models.module_assessment import ModuleAssessment
 from app.models.pending_certificate import PendingCertificate
+from app.models.platform_settings import PlatformSettings
 from app.models.progress import UserProgress
 from app.models.system_log import SystemLog
 from app.models.user import User
@@ -46,6 +49,8 @@ __all__ = [
     "CourseEnrollment",
     "CourseStatus",
     "EmailAudit",
+    "EmailTemplate",
+    "EmailTemplateKind",
     "IdentityType",
     "Lesson",
     "LessonFile",
@@ -54,6 +59,7 @@ __all__ = [
     "Module",
     "ModuleAssessment",
     "PendingCertificate",
+    "PlatformSettings",
     "SystemLog",
     "User",
     "UserAssessmentAnswer",

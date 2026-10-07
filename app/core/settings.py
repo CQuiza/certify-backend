@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     minio_path_certificate_template: str = Field(
         default="certificate/template", alias="MINIO_PATH_CERTIFICATE_TEMPLATE"
     )
+    minio_path_branding: str = Field(
+        default="platform/branding", alias="MINIO_PATH_BRANDING"
+    )
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_region: str = Field(default="", alias="MINIO_REGION")
 

@@ -182,3 +182,6 @@ skills-lock.json
 
 #docker 
 docker-compose.yml
+
+# Test database (pytest)
+test_certify.db

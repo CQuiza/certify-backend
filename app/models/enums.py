@@ -63,3 +63,9 @@ class EmailStatus(str, Enum):
     pending = "pending"
     sent = "sent"
     failed = "failed"
+
+
+class EmailTemplateKind(str, Enum):
+    credentials = "credentials"
+    certificate_issued = "certificate_issued"
+    certificate_expired = "certificate_expired"
