@@ -2,10 +2,10 @@
 Ejecuta las tareas diarias de expiración de certificados y backups de base de datos.
 """
 
-import anyio
 import logging
 import os
 import subprocess
+import traceback as _traceback
 from datetime import datetime, timezone
 
 from celery import shared_task
@@ -28,12 +28,53 @@ from app.utils.worker_audit import log_worker_action
 
 logger = logging.getLogger(__name__)
 
+
+def _persist_worker_log_sync(
+    task_name: str, level: str, detail: str, stacktrace: str | None = None
+) -> None:
+    """Registra en ``system_logs`` un evento de worker (API transversal)."""
+    import asyncio
+
+    from app.services.system_log_service import write_system_log
+
+    try:
+        asyncio.run(
+            write_system_log(
+                level=level,
+                source="worker",
+                event=f"worker:{task_name}",
+                detail=detail[:500] if detail else None,
+                stacktrace=stacktrace,
+            )
+        )
+    except Exception:
+        logger.exception("No se pudo guardar system_log de worker — task=%s", task_name)
+
+
+def _run_worker_task(task_name: str, coro) -> None:
+    """Ejecuta la tarea asíncrona y registra inicio/fin/error en system_logs."""
+    import asyncio
+
+    try:
+        asyncio.run(coro)
+    except Exception as exc:
+        _persist_worker_log_sync(
+            task_name,
+            "error",
+            str(exc) or exc.__class__.__name__,
+            "".join(_traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        )
+        raise
+    else:
+        _persist_worker_log_sync(task_name, "info", "finalizado")
+
+
 @shared_task(name="app.workers.tasks.check_expired_certificates")
 def check_expired_certificates():
     """
     Revisa certificados expirados, aplica marca de agua y actualiza la BD.
     """
-    anyio.run(_async_check_expired_certificates)
+    _run_worker_task("check_expired_certificates", _async_check_expired_certificates())
 
 
 async def _async_check_expired_certificates():
@@ -137,7 +178,7 @@ def backup_database_to_minio():
     """
     Realiza un backup de la base de datos usando pg_dump y lo sube a MinIO.
     """
-    anyio.run(_async_backup_database_to_minio)
+    _run_worker_task("backup_database_to_minio", _async_backup_database_to_minio())
 
 
 async def _async_backup_database_to_minio():

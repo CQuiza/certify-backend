@@ -169,30 +169,33 @@ sobre `proxy_network`) con:
 - `certify-infra/grafana/provisioning/datasources/loki.yaml` (datasource Loki + campo derivado `request_id`).
 - `gateway/conf.d/grafana.conf` (Grafana tras authentik, patrón igual a rabbitmq).
 
+La ingestión se hace **desde la propia app** (sin plugin de Docker): si `LOKI_URL`
+está definida, `configure_logging()` añade un `LokiHandler` (cola + thread en
+background, `httpx`) que envía los logs en lotes con labels `source`/`level`
+y `request_id` en el payload JSON.
+
 Pasos para adoptarlo en el servidor:
 
 ```bash
-# 1. Instalar el plugin de logging de Docker para Loki (requiere root)
-docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
-
-# 2. Levantar Loki + Grafana junto a la infra
+# 1. Levantar Loki + Grafana junto a la infra
 cd <ruta>/certify-infra
-docker compose -f docker-compose.yml -f docker-compose.loki.yml up -d
+sudo docker compose -f docker-compose.yml -f docker-compose.loki.yml up -d
 
-# 3. Añadir la ingestión a los servicios del backend (en su compose de prod):
-#    api / celery-worker / celery-beat:
-#      logging:
-#        driver: loki
-#        options:
-#          loki-url: "http://loki:3100/loki/api/v1/push"
-#          loki-external-labels: "compose_project=certify"
+# 2. En el backend (prod), fijar en el .env:
+#    LOG_FORMAT=json
+#    LOKI_URL=http://infra_loki:3100
+#    LOG_SOURCE=api            # api | worker
 
-# 4. Copiar gateway/conf.d/grafana.conf -> /etc/nginx/conf.d/ + certificado del subdominio
-# 5. Activar LOG_FORMAT=json en el backend y redeployar
+# 3. Copiar gateway/conf.d/grafana.conf -> /etc/nginx/conf.d/ + certificado del subdominio
+# 4. Redeployar el backend (reino de api / celery-*)
 ```
 
 Grafana queda en `https://grafana.cristhianquiza.com` tras authentik; el datasource
 **Loki** está provisionado con un campo derivado para `request_id`.
+
+**Nota sobre workers:** ejecutan los logs de propósito general, y además las tareas
+`check_expired_certificates` y `backup_database_to_minio` registran su inicio/fin/error
+en `system_logs` con `source=worker` (ver `app/workers/tasks.py`).
 
 ## Documentación de la API
 
