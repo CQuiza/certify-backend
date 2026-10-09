@@ -35,7 +35,7 @@ class PendingCertificateRepository:
                 PendingCertificate.course_id == course_id,
                 PendingCertificate.status == "in_progress",
             )
-            .order_by(PendingCertificate.created_at)
+            .order_by(PendingCertificate.created_at.desc())
         )
         return r.scalars().all()
 

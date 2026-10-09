@@ -35,10 +35,16 @@ def _async_database_url(url: str) -> str:
 
 
 _settings = get_settings()
+_url = _async_database_url(_settings.get_database_url())
+
+# Para SQLite (solo pruebas): timeout + WAL evitan "database is locked"
+# con sesiones concurrentes. En Postgres estos parámetros no se aplican.
+_sqlite_connect_args = {"timeout": 30} if _url.startswith("sqlite") else {}
 engine = create_async_engine(
-    _async_database_url(_settings.get_database_url()),
+    _url,
     echo=_settings.debug,
     pool_pre_ping=True,
+    connect_args=_sqlite_connect_args or None,
 )
 
 

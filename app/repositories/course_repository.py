@@ -16,7 +16,7 @@ class CourseRepository:
     async def list_by_ids(self, db: AsyncSession, ids: list[int]) -> Sequence[Course]:
         if not ids:
             return []
-        r = await db.execute(select(Course).where(Course.id.in_(ids)).order_by(Course.id))
+        r = await db.execute(select(Course).where(Course.id.in_(ids)).order_by(Course.id.desc()))
         return r.scalars().all()
 
     async def list(
@@ -39,7 +39,7 @@ class CourseRepository:
             q = q.where(
                 Course.title.ilike(pattern) | Course.description.ilike(pattern)
             )
-        q = q.order_by(Course.id).offset(skip).limit(limit)
+        q = q.order_by(Course.id.desc()).offset(skip).limit(limit)
         r = await db.execute(q)
         return r.scalars().all()
 

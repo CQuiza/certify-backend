@@ -40,6 +40,7 @@ class CourseEnrollmentRepository:
         r = await db.execute(
             select(CourseEnrollment)
             .where(CourseEnrollment.user_id == user_id)
+            .order_by(CourseEnrollment.id.desc())
             .offset(skip)
             .limit(limit),
         )
@@ -56,13 +57,16 @@ class CourseEnrollmentRepository:
         r = await db.execute(
             select(CourseEnrollment)
             .where(CourseEnrollment.course_id == course_id)
+            .order_by(CourseEnrollment.id.desc())
             .offset(skip)
             .limit(limit),
         )
         return r.scalars().all()
 
     async def list(self, db: AsyncSession, *, skip: int = 0, limit: int = 500) -> Sequence[CourseEnrollment]:
-        r = await db.execute(select(CourseEnrollment).offset(skip).limit(limit))
+        r = await db.execute(
+            select(CourseEnrollment).order_by(CourseEnrollment.id.desc()).offset(skip).limit(limit)
+        )
         return r.scalars().all()
 
     async def list_by_teacher_courses(
@@ -77,6 +81,7 @@ class CourseEnrollmentRepository:
             select(CourseEnrollment)
             .join(Course, CourseEnrollment.course_id == Course.id)
             .where(Course.teacher_id == teacher_id)
+            .order_by(CourseEnrollment.id.desc())
             .offset(skip)
             .limit(limit),
         )

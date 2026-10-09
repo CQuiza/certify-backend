@@ -53,8 +53,18 @@ async def create_course(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
 ) -> object:
-    if current.role not in (UserRole.superuser.value, UserRole.admin.value):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
+    if current.role == UserRole.teacher.value:
+        # El teacher crea el curso y queda como su docente.
+        return await course_repository.create(
+            db,
+            title=body.title,
+            description=body.description,
+            certificate_type_id=body.certificate_type_id,
+            teacher_id=current.id,
+            status=body.status.value,
+        )
+    if not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores o docentes")
     return await course_repository.create(
         db,
         title=body.title,
@@ -72,11 +82,14 @@ async def update_course(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
 ) -> object:
-    if not is_super_or_admin(current):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
     c = await course_repository.get_by_id(db, course_id)
     if not c:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curso no encontrado")
+    if current.role == UserRole.teacher.value:
+        if c.teacher_id != current.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el docente del curso puede editarlo")
+    elif not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
     payload = body.model_dump(exclude_unset=True)
     if "status" in payload and payload["status"] is not None:
         payload["status"] = payload["status"].value
@@ -89,9 +102,12 @@ async def delete_course(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    if not is_super_or_admin(current):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
     c = await course_repository.get_by_id(db, course_id)
     if not c:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curso no encontrado")
+    if current.role == UserRole.teacher.value:
+        if c.teacher_id != current.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el docente del curso puede eliminarlo")
+    elif not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
     await course_repository.delete(db, c)

@@ -50,7 +50,7 @@ class CertificateRepository:
         if statuses is not None:
             q = q.where(Certificate.status.in_(statuses))
         q = self._apply_search(q, search=search)
-        q = q.offset(skip).limit(limit).order_by(Certificate.id)
+        q = q.offset(skip).limit(limit).order_by(Certificate.id.desc())
         r = await db.execute(q)
         return r.scalars().all()
 

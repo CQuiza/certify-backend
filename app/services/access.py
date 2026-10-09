@@ -3,6 +3,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.course import Course
 from app.models.enums import CourseStatus, UserRole
 from app.models.lesson import Lesson
 from app.models.module import Module
@@ -103,6 +104,11 @@ async def teacher_owns_lesson(db: AsyncSession, user: User, lesson: Lesson) -> b
     if not mod:
         return False
     return await teacher_owns_module(db, user, mod)
+
+
+async def teacher_owns_course(db: AsyncSession, user: User, course: Course | None) -> bool:
+    """True si el usuario es teacher y es dueño del curso."""
+    return bool(course and is_teacher(user) and course.teacher_id == user.id)
 
 
 def require_staff(user: User) -> None:

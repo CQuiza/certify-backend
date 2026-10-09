@@ -38,13 +38,16 @@ class UserProgressRepository:
         r = await db.execute(
             select(UserProgress)
             .where(UserProgress.user_id == user_id)
+            .order_by(UserProgress.id.desc())
             .offset(skip)
             .limit(limit),
         )
         return r.scalars().all()
 
     async def list(self, db: AsyncSession, *, skip: int = 0, limit: int = 500) -> Sequence[UserProgress]:
-        r = await db.execute(select(UserProgress).offset(skip).limit(limit))
+        r = await db.execute(
+            select(UserProgress).order_by(UserProgress.id.desc()).offset(skip).limit(limit)
+        )
         return r.scalars().all()
 
     async def create(

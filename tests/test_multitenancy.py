@@ -44,7 +44,7 @@ async def test_isolation_courses_between_tenants(
 @pytest.mark.asyncio
 async def test_same_email_allowed_in_different_tenants(db, tenant_b_credentials):
     acme_tenant_id = await _tenant_id("acme")
-    email = "duplicado@test.local"
+    email = "duplicado@example.com"
     # En ACME se crea sin problema.
     async with tenant_ctx(acme_tenant_id):
         u = await user_repository.create(
@@ -64,14 +64,14 @@ async def test_same_email_allowed_in_different_tenants(db, tenant_b_credentials)
 
 @pytest.mark.asyncio
 async def test_default_tenant_cannot_create_duplicate_email(db):
-    # 'student@test.local' ya existe en DEFAULT.
-    result = await db.execute(select(User).where(User.email == "student@test.local"))
+    # 'student@example.com' ya existe en DEFAULT.
+    result = await db.execute(select(User).where(User.email == "student@example.com"))
     if result.scalar_one_or_none() is None:
         from app.core.security import get_password_hash
 
         await user_repository.create(
             db,
-            email="student@test.local",
+            email="student@example.com",
             password_hash=get_password_hash("x"),
             name="Est",
             first_last_name="Prueba",
@@ -81,7 +81,7 @@ async def test_default_tenant_cannot_create_duplicate_email(db):
             phone_number="+570000000011",
             is_active=True,
         )
-    dup = await db.execute(select(User).where(User.email == "student@test.local"))
+    dup = await db.execute(select(User).where(User.email == "student@example.com"))
     assert dup.scalar_one_or_none() is not None
 
 

@@ -65,7 +65,7 @@ class UserRepository:
     ) -> Sequence[User]:
         q = select(User).offset(skip).limit(limit)
         q = self._apply_filters(q, role=role, exclude_superuser=exclude_superuser, search=search)
-        r = await db.execute(q.order_by(User.id))
+        r = await db.execute(q.order_by(User.id.desc()))
         return r.scalars().all()
 
     async def create(
@@ -186,7 +186,7 @@ class UserRepository:
                 | CertificateType.name.ilike(pattern)
             )
         q = q.offset(skip).limit(limit)
-        r = await db.execute(q.order_by(User.id))
+        r = await db.execute(q.order_by(User.id.desc()))
         return r.scalars().all()
 
     async def delete(self, db: AsyncSession, user: User) -> None:

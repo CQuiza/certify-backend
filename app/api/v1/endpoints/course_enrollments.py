@@ -9,9 +9,10 @@ from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
 from app.models.enums import UserRole
 from app.models.user import User
+from app.repositories.course_repository import course_repository
 from app.repositories.enrollment_repository import course_enrollment_repository
 from app.schemas.enrollment import CourseEnrollmentCreate, CourseEnrollmentRead
-from app.services.access import is_super_or_admin, is_teacher
+from app.services.access import is_super_or_admin, is_teacher, teacher_owns_course
 
 router = APIRouter(prefix="/course-enrollments", tags=["course-enrollments"])
 
@@ -52,6 +53,11 @@ async def get_enrollment(
     row = await course_enrollment_repository.get_by_id(db, enrollment_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inscripción no encontrada")
+    if is_teacher(current):
+        course = await course_repository.get_by_id(db, row.course_id)
+        if not course or not await teacher_owns_course(db, current, course):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
+        return row
     if current.role == UserRole.student.value and row.user_id != current.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso")
     if not is_super_or_admin(current) and row.user_id != current.id:
@@ -65,8 +71,15 @@ async def create_enrollment(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
 ) -> object:
-    if not is_super_or_admin(current):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
+    if is_teacher(current):
+        course = await course_repository.get_by_id(db, body.course_id)
+        if not course or course.teacher_id != current.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Solo puedes inscribir estudiantes en tus propios cursos",
+            )
+    elif not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores o docentes")
     existing = await course_enrollment_repository.get_by_user_course(db, body.user_id, body.course_id)
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya inscrito")
@@ -79,9 +92,16 @@ async def delete_enrollment(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    if not is_super_or_admin(current):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
     row = await course_enrollment_repository.get_by_id(db, enrollment_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inscripción no encontrada")
+    if is_teacher(current):
+        course = await course_repository.get_by_id(db, row.course_id)
+        if not course or course.teacher_id != current.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Solo puedes desinscribir estudiantes de tus propios cursos",
+            )
+    elif not is_super_or_admin(current):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores o docentes")
     await course_enrollment_repository.delete(db, row)

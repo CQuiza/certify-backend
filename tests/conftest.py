@@ -19,11 +19,11 @@ os.environ["LOKI_URL"] = ""
 os.environ["LOG_FORMAT"] = "text"
 os.environ["ALLOWED_HOSTS"] = '["*"]'
 os.environ["CORS_ORIGINS"] = '["http://localhost:3000"]'
-os.environ["SUPERUSER_EMAIL"] = "super@test.local"
+os.environ["SUPERUSER_EMAIL"] = "super@example.com"
 os.environ["SUPERUSER_PASSWORD"] = "TestPassw0rd!!"
 os.environ["SUPERUSER_NAME"] = "Super"
 os.environ["SUPERUSER_FIRST_LAST_NAME"] = "Usuario"
-os.environ["SYSTEM_BOT_USER_EMAIL"] = "system@test.local"
+os.environ["SYSTEM_BOT_USER_EMAIL"] = "system@example.com"
 os.environ["DEFAULT_TENANT_SLUG"] = "default"
 os.environ["ROOT_DOMAIN"] = "testserver"
 
@@ -43,7 +43,7 @@ from app.models.user import User  # noqa: E402
 SUPERUSER_EMAIL = os.environ["SUPERUSER_EMAIL"]
 SUPERUSER_PASSWORD = os.environ["SUPERUSER_PASSWORD"]
 SYSTEM_BOT_EMAIL = os.environ["SYSTEM_BOT_USER_EMAIL"]
-STUDENT_EMAIL = "student@test.local"
+STUDENT_EMAIL = "student@example.com"
 STUDENT_PASSWORD = "StudentPass1!"
 DEFAULT_SLUG = os.environ["DEFAULT_TENANT_SLUG"]
 
@@ -221,3 +221,34 @@ async def student_token() -> str:
             await session.commit()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
         return await _login(ac, STUDENT_EMAIL, STUDENT_PASSWORD)
+
+
+TEACHER_EMAIL = "teacher@example.com"
+TEACHER_PASSWORD = "TeacherPass123!"
+
+
+@pytest.fixture(scope="session")
+async def teacher_token() -> str:
+    from app.models.user import User
+
+    default_id = await _default_tenant_id()
+    async with AsyncSessionLocal() as session:
+        existing = await session.execute(select(User).where(User.email == TEACHER_EMAIL))
+        if existing.scalar_one_or_none() is None:
+            session.add(
+                User(
+                    email=TEACHER_EMAIL,
+                    password_hash=get_password_hash(TEACHER_PASSWORD),
+                    name="Docente",
+                    first_last_name="Prueba",
+                    role="teacher",
+                    identity_type="CC",
+                    identity_number="7070707070",
+                    phone_number="+570000000077",
+                    is_active=True,
+                    tenant_id=default_id,
+                )
+            )
+            await session.commit()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+        return await _login(ac, TEACHER_EMAIL, TEACHER_PASSWORD)
