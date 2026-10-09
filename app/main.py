@@ -117,16 +117,19 @@ async def _seed_default_tenant(db) -> "Tenant":
 
 
 async def _seed_superuser() -> None:
-    """Crea el superusuario inicial si no existe."""
+    """Crea el superusuario inicial en el tenant por defecto si no existe."""
     settings = get_settings()
     async with AsyncSessionLocal() as session:
+        tenant = await _seed_default_tenant(session)
         result = await session.execute(
-            select(User).where(User.email == settings.superuser_email)
+            select(User).where(
+                User.email == settings.superuser_email,
+                User.tenant_id == tenant.id,
+            )
         )
         if result.scalar_one_or_none() is not None:
             return
 
-        tenant = await _seed_default_tenant(session)
         superuser = User(
             email=settings.superuser_email,
             password_hash=get_password_hash(settings.superuser_password),
@@ -145,19 +148,22 @@ async def _seed_superuser() -> None:
 
 
 async def _seed_system_bot(db_session=None) -> None:
-    """Crea el usuario system bot (por tenant) si no existe."""
+    """Crea el usuario system bot del tenant por defecto si no existe.
+
+    El bot se consulta por tenant porque hay un bot por cada organización.
+    """
     settings = get_settings()
     async with AsyncSessionLocal() as session:
+        tenant = await _seed_default_tenant(session)
         result = await session.execute(
             select(User).where(
                 User.email == settings.system_bot_user_email,
-                User.tenant_id.isnot(None),
+                User.tenant_id == tenant.id,
             )
         )
         if result.scalar_one_or_none() is not None:
             return
 
-        tenant = await _seed_default_tenant(session)
         bot = User(
             email=settings.system_bot_user_email,
             password_hash=get_password_hash(secrets.token_urlsafe(32)),

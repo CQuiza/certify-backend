@@ -150,6 +150,16 @@ async def test_create_tenant_duplicate_slug(client, superuser_token):
 
 
 @pytest.mark.asyncio
+async def test_seeds_do_not_crash_with_multiple_tenants(tenant_b_credentials):
+    """Regresión: con varias orgs (y su bot cada una), el seed de arranque
+    no debe lanzar MultipleResultsFound ni romper la app."""
+    from app.main import _seed_system_bot, _seed_superuser
+
+    await _seed_superuser()
+    await _seed_system_bot()
+
+
+@pytest.mark.asyncio
 async def test_deactivate_tenant(client, superuser_token):
     resp = await client.post(
         "/api/v1/admin/tenants",
