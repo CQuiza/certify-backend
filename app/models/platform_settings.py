@@ -1,9 +1,4 @@
-"""Configuración personalizable de la plataforma (por tenant).
-
-Fila singleton por ``tenant_key``. Hoy solo existe ``'default'``; el campo
-``tenant_key`` deja preparada la fase multitenancy para resolver la
-configuración por inquilino sin cambios de esquema.
-"""
+"""Configuración personalizable de la plataforma (una fila por tenant)."""
 
 from __future__ import annotations
 
@@ -26,9 +21,8 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.email_template import EmailTemplate
+    from app.models.tenant import Tenant
     from app.models.user import User
-
-DEFAULT_TENANT_KEY = "default"
 
 #: Mensaje del dashboard. Los placeholders se interpolan con
 #: ``app_name`` y ``organization`` al renderizar.
@@ -38,16 +32,16 @@ DEFAULT_DASHBOARD_MESSAGE = (
 
 
 class PlatformSettings(Base):
-    """Personalización de organización, marca y mensajería."""
+    """Personalización de organización, marca y mensajería (una fila por tenant)."""
 
     __tablename__ = "platform_settings"
     __table_args__ = (
-        UniqueConstraint("tenant_key"),
+        UniqueConstraint("tenant_id", name="uq_platform_settings_tenant_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tenant_key: Mapped[str] = mapped_column(
-        String(100), nullable=False, default=DEFAULT_TENANT_KEY
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
 
     # ── Organización / marca ──────────────────────────────────
@@ -83,3 +77,4 @@ class PlatformSettings(Base):
         cascade="all, delete-orphan",
     )
     updater: Mapped[User | None] = relationship("User", foreign_keys=[updated_by])
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="settings")

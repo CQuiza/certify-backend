@@ -149,6 +149,10 @@ class Settings(BaseSettings):
         default="amqp://user:pass@host:5672//", alias="RABBITMQ_URL"
     )
 
+    # Multitenancy
+    root_domain: str = Field(default="", alias="ROOT_DOMAIN")
+    default_tenant_slug: str = Field(default="default", alias="DEFAULT_TENANT_SLUG")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors(cls, v: object) -> object:

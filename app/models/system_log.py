@@ -38,6 +38,9 @@ class SystemLog(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     level: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     event: Mapped[str] = mapped_column(String(255), nullable=False)

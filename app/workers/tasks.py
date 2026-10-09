@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
 from app.core.settings import get_settings
+from app.core.tenant import tenant_ctx
 from app.models import LessonTask  # noqa: F401 — asegura registro del mapper
 from app.models.certificate import Certificate
 from app.models.certificate_audit import CertificateAudit
@@ -110,50 +111,56 @@ async def _async_check_expired_certificates():
             return
 
         storage = CertificateStorageService(settings)
-        system_user = await user_repository.get_by_email(session, settings.system_bot_user_email)
-        system_bot_id = system_user.id if system_user else None
 
         for cert in certificates:
             uid_str = str(cert.unique_id)
-
-            try:
-                raw_pdf = await storage.download_pdf(uid_str)
-                watermarked_pdf = apply_revoked_watermark_pdf(raw_pdf, watermark_text="EXPIRADO")
-                await storage.upload_pdf(uid_str, watermarked_pdf)
-            except Exception as e:
-                errors.append(f"Certificado {cert.id}: {e}")
-                continue
-
-            cert.status = CertificateStatus.expired.value
-
-            audit = CertificateAudit(
-                certificate_id=cert.id,
-                certificate_unique_id=cert.unique_id,
-                action=CertificateAuditAction.expired.value,
-                performed_by=system_bot_id,
-            )
-            session.add(audit)
-
-            student_user = cert.user
-            if student_user and student_user.email:
-                email_audit = EmailAudit(
-                    user_name=student_user.name,
-                    email_to=student_user.email,
-                    email_type="certificate_expired",
+            # El procesamiento (auditorías, correo, plantillas) se ejecuta en el
+            # tenant del certificado para mantener el aislamiento por-tenant.
+            async with tenant_ctx(cert.tenant_id):
+                system_user = await user_repository.get_by_email(
+                    session, settings.system_bot_user_email
                 )
-                session.add(email_audit)
-                await session.flush()
+                system_bot_id = system_user.id if system_user else None
+
                 try:
-                    await send_certificate_expired_email(
-                        email_to=student_user.email,
-                        student_name=student_user.name or "Estudiante",
-                        certificate_uid=uid_str,
-                    )
-                    email_audit.status = EmailStatus.sent.value
-                    email_audit.sent_at = func.now()
+                    raw_pdf = await storage.download_pdf(uid_str)
+                    watermarked_pdf = apply_revoked_watermark_pdf(raw_pdf, watermark_text="EXPIRADO")
+                    await storage.upload_pdf(uid_str, watermarked_pdf)
                 except Exception as e:
-                    email_audit.status = EmailStatus.failed.value
-                    email_audit.error = str(e)
+                    errors.append(f"Certificado {cert.id}: {e}")
+                    continue
+
+                cert.status = CertificateStatus.expired.value
+
+                audit = CertificateAudit(
+                    certificate_id=cert.id,
+                    certificate_unique_id=cert.unique_id,
+                    action=CertificateAuditAction.expired.value,
+                    performed_by=system_bot_id,
+                )
+                session.add(audit)
+
+                student_user = cert.user
+                if student_user and student_user.email:
+                    email_audit = EmailAudit(
+                        user_name=student_user.name,
+                        email_to=student_user.email,
+                        email_type="certificate_expired",
+                    )
+                    session.add(email_audit)
+                    await session.flush()
+                    try:
+                        await send_certificate_expired_email(
+                            email_to=student_user.email,
+                            student_name=student_user.name or "Estudiante",
+                            certificate_uid=uid_str,
+                            tenant_id=cert.tenant_id,
+                        )
+                        email_audit.status = EmailStatus.sent.value
+                        email_audit.sent_at = func.now()
+                    except Exception as e:
+                        email_audit.status = EmailStatus.failed.value
+                        email_audit.error = str(e)
                     logger.exception("Error enviando correo de expiración a %s", student_user.email)
 
             processed += 1

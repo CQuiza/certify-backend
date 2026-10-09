@@ -9,9 +9,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 
-class UserAudit(Base):
+class UserAudit(TenantScoped, Base):
     __tablename__ = "user_audit"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

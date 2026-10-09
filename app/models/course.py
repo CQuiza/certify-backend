@@ -18,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.certificate_type import CertificateType
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Course(Base):
+class Course(TenantScoped, Base):
     __tablename__ = "courses"
     __table_args__ = (
         CheckConstraint(
@@ -80,7 +81,7 @@ class Course(Base):
     )
 
 
-class CourseEnrollment(Base):
+class CourseEnrollment(TenantScoped, Base):
     """Inscripción estudiante–curso (requerido por reglas de negocio; no está en model.db)."""
 
     __tablename__ = "course_enrollments"

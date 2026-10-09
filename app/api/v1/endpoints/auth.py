@@ -53,7 +53,9 @@ async def login(
             detail="Credenciales incorrectas",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = create_access_token(subject=user.id)
+    token = create_access_token(
+        subject=user.id, extra_claims={"tenant_id": user.tenant_id}
+    )
     settings = get_settings()
     refresh_token = generate_refresh_token()
     user.refresh_token_hash = hash_refresh_token(refresh_token)
@@ -94,7 +96,9 @@ async def refresh_access_token(
             detail="Refresh token inválido o expirado",
         )
 
-    new_access = create_access_token(subject=user.id)
+    new_access = create_access_token(
+        subject=user.id, extra_claims={"tenant_id": user.tenant_id}
+    )
     new_refresh = generate_refresh_token()
     user.refresh_token_hash = hash_refresh_token(new_refresh)
     user.refresh_token_expires_at = refresh_token_expires_at()

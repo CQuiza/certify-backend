@@ -17,6 +17,7 @@ from app.utils.certificate_editor import (
 )
 from app.utils.helpers import student_display_name
 from app.utils.make_qr_code import MakeQRCode
+from app.services.tenant_service import tenant_service
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class CertificatePdfService:
         settings = get_settings()
         issued_at = _issued_date(cert)
         uid = str(cert.unique_id)
-        base = settings.base_url.rstrip("/")
+        base = await tenant_service.origin_for_tenant_id(db, student.tenant_id)
         api = settings.api_v1_prefix.rstrip("/")
         verify_url = f"{base}{api}/certificates/view/{uid}"
         hours = cert.hours if cert.hours is not None else ct.hours

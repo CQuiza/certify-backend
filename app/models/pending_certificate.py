@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.certificate import Certificate
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class PendingCertificate(Base):
+class PendingCertificate(TenantScoped, Base):
     """Certificado retenido: se emite automáticamente cuando el estudiante
     completa el curso al 100%."""
 

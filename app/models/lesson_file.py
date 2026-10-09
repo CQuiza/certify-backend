@@ -9,12 +9,13 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.lesson import Lesson
 
 
-class LessonFile(Base):
+class LessonFile(TenantScoped, Base):
     __tablename__ = "lesson_files"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

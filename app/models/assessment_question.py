@@ -8,6 +8,7 @@ from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.assessment_option import AssessmentOption
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
     from app.models.user_assessment_attempt import UserAssessmentAnswer
 
 
-class AssessmentQuestion(Base):
+class AssessmentQuestion(TenantScoped, Base):
     __tablename__ = "assessment_questions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

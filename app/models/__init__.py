@@ -30,6 +30,7 @@ from app.models.pending_certificate import PendingCertificate
 from app.models.platform_settings import PlatformSettings
 from app.models.progress import UserProgress
 from app.models.system_log import SystemLog
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_assessment_attempt import UserAssessmentAnswer, UserAssessmentAttempt
 from app.models.user_audit import UserAudit
@@ -61,6 +62,7 @@ __all__ = [
     "PendingCertificate",
     "PlatformSettings",
     "SystemLog",
+    "Tenant",
     "User",
     "UserAssessmentAnswer",
     "UserAssessmentAttempt",

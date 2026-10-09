@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.assessment_question import AssessmentQuestion
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class UserAssessmentAttempt(Base):
+class UserAssessmentAttempt(TenantScoped, Base):
     __tablename__ = "user_assessment_attempts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -48,7 +49,7 @@ class UserAssessmentAttempt(Base):
     )
 
 
-class UserAssessmentAnswer(Base):
+class UserAssessmentAnswer(TenantScoped, Base):
     __tablename__ = "user_assessment_answers"
     __table_args__ = (
         UniqueConstraint(

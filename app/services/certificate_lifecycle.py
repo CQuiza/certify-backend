@@ -19,6 +19,7 @@ from app.services.certificate_notification import CertificateNotificationService
 from app.services.certificate_pdf import CertificatePdfService
 from app.services.certificate_storage import CertificateStorageService
 from app.services.datetime_utils import compute_certificate_expires_at
+from app.services.tenant_service import tenant_service
 from app.utils.helpers import student_display_name
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ class CertificateLifecycleService:
             validity_years = ct.validity_value
         settings = get_settings()
 
-        base = settings.base_url.rstrip("/")
+        base = await tenant_service.origin_for_tenant_id(db, student.tenant_id)
         api = settings.api_v1_prefix.rstrip("/")
 
         cert = await certificate_repository.create(
@@ -280,7 +281,7 @@ class CertificateLifecycleService:
         student = await user_repository.get_by_id(db, cert.user_id)
         if student and background_tasks:
             settings = get_settings()
-            base = settings.base_url.rstrip("/")
+            base = await tenant_service.origin_for_tenant_id(db, student.tenant_id)
             api = settings.api_v1_prefix.rstrip("/")
             self._notification.notify_issued(
                 student.email,

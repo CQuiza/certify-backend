@@ -9,13 +9,14 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.lesson_task import LessonTask
     from app.models.user import User
 
 
-class TaskSubmission(Base):
+class TaskSubmission(TenantScoped, Base):
     __tablename__ = "task_submissions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

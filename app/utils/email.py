@@ -14,9 +14,11 @@ from starlette.datastructures import Headers, UploadFile
 
 from app.core.database import AsyncSessionLocal
 from app.core.settings import get_settings
+from app.core.tenant import tenant_ctx
 from app.models.enums import EmailStatus
 from app.services.email_template_service import RawHTML, email_template_service
 from app.services.platform_settings_service import EmailConfig, platform_settings_service
+from app.services.tenant_service import tenant_service
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +69,12 @@ def inline_logo_attachments(logo_bytes: bytes | None) -> list[dict]:
     ]
 
 
-def _base_context(ctx, template_context: dict) -> dict:
+def _base_context(ctx, template_context: dict, origin: str) -> dict:
     context: dict = dict(template_context)
     context["logo"] = ctx.logo_html
     context["app_name"] = ctx.app_name
     context["organization_name"] = ctx.organization_name or ctx.app_name
+    context.setdefault("login_url", f"{origin}/login")
     return context
 
 
@@ -80,48 +83,57 @@ async def _dispatch(
     recipients: list[str],
     template_context: dict,
     log_ref: str,
+    *,
+    tenant_id: int | None = None,
 ) -> None:
     """Resuelve config+plantilla y envía el correo del tipo dado."""
     try:
-        async with AsyncSessionLocal() as session:
-            ctx = await platform_settings_service.get_email_context(session)
-        if ctx is None:
-            logger.warning(
-                "SMTP no configurado. No se envió correo (%s) a %s", kind, log_ref
-            )
-            return
-        template = ctx.templates.get(kind)
-        if template is None:
-            logger.warning("Plantilla '%s' no existe", kind)
-            return
-        context = _base_context(ctx, template_context)
-        subject, body = email_template_service.render(template, context)
-        conf = build_connection_config(ctx.cfg)
-        if conf is None:
-            logger.warning("SMTp sin dirección de remitente — %s a %s", kind, log_ref)
-            return
-        message = MessageSchema(
-            subject=subject,
-            recipients=recipients,
-            body=body,
-            subtype="html",
-            attachments=inline_logo_attachments(ctx.logo_bytes),
-        )
-        fm = FastMail(conf)
-        await fm.send_message(message)
-        logger.info("Correo '%s' enviado a %s", kind, log_ref)
+        if tenant_id is not None:
+            async with tenant_ctx(tenant_id):
+                await _dispatch_impl(kind, recipients, template_context, log_ref)
+        else:
+            await _dispatch_impl(kind, recipients, template_context, log_ref)
     except Exception:
         logger.exception("Error enviando correo '%s' a %s", kind, log_ref)
 
 
+async def _dispatch_impl(kind, recipients, template_context, log_ref) -> None:
+    async with AsyncSessionLocal() as session:
+        origin = await tenant_service.current_public_origin(session)
+        ctx = await platform_settings_service.get_email_context(session)
+    if ctx is None:
+        logger.warning(
+            "SMTP no configurado. No se envió correo (%s) a %s", kind, log_ref
+        )
+        return
+    template = ctx.templates.get(kind)
+    if template is None:
+        logger.warning("Plantilla '%s' no existe", kind)
+        return
+    context = _base_context(ctx, template_context, origin)
+    subject, body = email_template_service.render(template, context)
+    conf = build_connection_config(ctx.cfg)
+    if conf is None:
+        logger.warning("SMTP sin dirección de remitente — %s a %s", kind, log_ref)
+        return
+    message = MessageSchema(
+        subject=subject,
+        recipients=recipients,
+        body=body,
+        subtype="html",
+        attachments=inline_logo_attachments(ctx.logo_bytes),
+    )
+    fm = FastMail(conf)
+    await fm.send_message(message)
+    logger.info("Correo '%s' enviado a %s", kind, log_ref)
+
+
 async def send_credentials_email(email_to: str, password: str) -> None:
     """Envía un correo con las credenciales al usuario recién creado."""
-    settings = get_settings()
-    login_url = f"{settings.base_url.rstrip('/')}/login"
     await _dispatch(
         "credentials",
         [email_to],
-        {"email": email_to, "password": password, "login_url": login_url},
+        {"email": email_to, "password": password},
         email_to,
     )
 
@@ -158,6 +170,7 @@ async def send_certificate_expired_email(
     student_name: str,
     certificate_uid: str,
     base_url: str | None = None,
+    tenant_id: int | None = None,
 ) -> None:
     """Envía un correo notificando la expiración de un certificado."""
     await _dispatch(
@@ -165,6 +178,7 @@ async def send_certificate_expired_email(
         [email_to],
         {"student_name": student_name},
         email_to,
+        tenant_id=tenant_id,
     )
 
 

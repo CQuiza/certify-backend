@@ -18,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.certificate import Certificate
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
     from app.models.progress import UserProgress
 
 
-class User(Base):
+class User(TenantScoped, Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint(
@@ -36,9 +37,9 @@ class User(Base):
             "identity_type IN ('CC', 'TI', 'CE', 'PPT', 'PASSPORT', 'OTHER')",
             name="identity_type",
         ),
-        UniqueConstraint("email", name="users_email_key"),
-        UniqueConstraint("identity_number", name="users_identity_number_key"),
-        UniqueConstraint("phone_number", name="users_phone_number_key"),
+        UniqueConstraint("tenant_id", "email", name="users_tenant_email_key"),
+        UniqueConstraint("tenant_id", "identity_number", name="users_tenant_identity_number_key"),
+        UniqueConstraint("tenant_id", "phone_number", name="users_tenant_phone_number_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

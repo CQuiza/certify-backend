@@ -8,12 +8,13 @@ from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.assessment_question import AssessmentQuestion
 
 
-class AssessmentOption(Base):
+class AssessmentOption(TenantScoped, Base):
     __tablename__ = "assessment_options"
     __table_args__ = (
         UniqueConstraint(

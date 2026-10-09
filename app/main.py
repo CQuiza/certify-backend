@@ -20,7 +20,7 @@ from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.logging_config import configure_logging, request_id_var
 from app.core.security import get_password_hash
 from app.core.settings import get_settings
-from app.api.v1.router import api_router
+from app.api.v1.router import ROUTERS as endpoint_routers
 from app.models import (  # noqa: F401 — registra metadatos
     Certificate,
     CertificateAudit,
@@ -92,6 +92,30 @@ async def create_database_if_not_exists() -> None:
         await temp_engine.dispose()
 
 
+async def _seed_default_tenant(db) -> "Tenant":
+    """Crea el tenant por defecto si no existe (modo single / retrocompat)."""
+    from sqlalchemy import select
+
+    from app.core.settings import get_settings
+    from app.models.tenant import Tenant
+
+    settings = get_settings()
+    r = await db.execute(
+        select(Tenant).where(Tenant.slug == settings.default_tenant_slug)
+    )
+    tenant = r.scalar_one_or_none()
+    if tenant is None:
+        tenant = Tenant(
+            name=f"{settings.project_name} (predeterminado)",
+            slug=settings.default_tenant_slug,
+            is_active=True,
+        )
+        db.add(tenant)
+        await db.flush()
+        await db.refresh(tenant)
+    return tenant
+
+
 async def _seed_superuser() -> None:
     """Crea el superusuario inicial si no existe."""
     settings = get_settings()
@@ -102,6 +126,7 @@ async def _seed_superuser() -> None:
         if result.scalar_one_or_none() is not None:
             return
 
+        tenant = await _seed_default_tenant(session)
         superuser = User(
             email=settings.superuser_email,
             password_hash=get_password_hash(settings.superuser_password),
@@ -112,22 +137,27 @@ async def _seed_superuser() -> None:
             identity_number=settings.superuser_identity_number,
             phone_number=settings.superuser_phone_number,
             is_active=True,
+            tenant_id=tenant.id,
         )
         session.add(superuser)
         await session.commit()
         logger.info("Superusuario '%s' creado.", settings.superuser_email)
 
 
-async def _seed_system_bot() -> None:
-    """Crea el usuario system bot si no existe."""
+async def _seed_system_bot(db_session=None) -> None:
+    """Crea el usuario system bot (por tenant) si no existe."""
     settings = get_settings()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(User).where(User.email == settings.system_bot_user_email)
+            select(User).where(
+                User.email == settings.system_bot_user_email,
+                User.tenant_id.isnot(None),
+            )
         )
         if result.scalar_one_or_none() is not None:
             return
 
+        tenant = await _seed_default_tenant(session)
         bot = User(
             email=settings.system_bot_user_email,
             password_hash=get_password_hash(secrets.token_urlsafe(32)),
@@ -138,6 +168,7 @@ async def _seed_system_bot() -> None:
             identity_number=f"BOT-{settings.system_bot_user_email}",
             phone_number=f"+000{abs(hash(settings.system_bot_user_email)) % 10_000_000_000:010d}",
             is_active=True,
+            tenant_id=tenant.id,
         )
         session.add(bot)
         await session.commit()
@@ -205,6 +236,73 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+async def _resolve_tenant_from_token(request: Request) -> int | None:
+    """Lee el claim `tenant_id` del JWT (Bearer o cookie)."""
+    from app.core.security import decode_token
+
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:].strip() if auth.startswith("Bearer ") else None
+    if not token:
+        token = request.cookies.get("access_token")
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+        tid = payload.get("tenant_id")
+        return int(tid) if tid else None
+    except Exception:
+        return None
+
+
+async def _resolve_tenant_from_host(request: Request) -> int | None:
+    """Resuelve el tenant por subdominio `{slug}.{ROOT_DOMAIN}` o dominio custom."""
+    from sqlalchemy import or_, select
+
+    from app.models.tenant import Tenant
+
+    settings = get_settings()
+    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+    if not host or not settings.root_domain:
+        return None
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Tenant.id).where(
+                or_(Tenant.slug == host, Tenant.domain == host)
+            ).limit(1)
+        )
+        tenant_id = result.scalar_one_or_none()
+        if tenant_id is not None:
+            return int(tenant_id)
+        if host.endswith("." + settings.root_domain) and len(host) > len(settings.root_domain):
+            slug = host[: -(len(settings.root_domain) + 1)]
+            if slug:
+                result = await session.execute(
+                    select(Tenant.id).where(Tenant.slug == slug).limit(1)
+                )
+                tenant_id = result.scalar_one_or_none()
+                return int(tenant_id) if tenant_id is not None else None
+    return None
+
+
+@app.middleware("http")
+async def tenant_context_middleware(request: Request, call_next):
+    """Resuelve el tenant de la petición (JWT → subdominio → default)."""
+    from app.core.tenant import make_tenant_token, reset_tenant_context
+
+    tenant_id = await _resolve_tenant_from_token(request)
+    if tenant_id is None:
+        tenant_id = await _resolve_tenant_from_host(request)
+    if tenant_id is None:
+        # Sin contexto: get_db asignará el tenant por defecto.
+        return await call_next(request)
+    token = make_tenant_token(tenant_id)
+    try:
+        return await call_next(request)
+    finally:
+        reset_tenant_context(token)
+
+
 async def _record_api_error(request: Request, request_id: str, exc: Exception | None, status_code: int) -> None:
     """Persiste en system_logs un error de la API. Silencioso."""
     from app.services.system_log_service import write_system_log
@@ -248,5 +346,6 @@ async def request_context_and_errors(request: Request, call_next):
     response.headers["X-Request-ID"] = request_id
     return response
 
-app.include_router(api_router, prefix=settings.api_v1_prefix)
+for endpoint_router in endpoint_routers:
+    app.include_router(endpoint_router, prefix=settings.api_v1_prefix)
 

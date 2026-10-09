@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user, get_optional_user
-from app.core.database import get_db
+from app.core.database import get_db, get_db_unscoped
 from app.core.rate_limit import limiter
 from app.models.user import User
 from app.repositories.system_log_repository import system_log_repository
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
 @router.get("/logs", response_model=SystemLogListResponse)
 async def list_system_logs(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
     current: Annotated[User, Depends(get_current_user)],
     level: Annotated[str | None, Query()] = None,
     source: Annotated[str | None, Query()] = None,

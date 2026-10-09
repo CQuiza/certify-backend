@@ -10,13 +10,14 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.certificate import Certificate
     from app.models.user import User
 
 
-class CertificateAudit(Base):
+class CertificateAudit(TenantScoped, Base):
     __tablename__ = "certificate_audit"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

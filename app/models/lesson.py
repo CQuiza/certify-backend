@@ -8,6 +8,7 @@ from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.lesson_file import LessonFile
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from app.models.progress import UserProgress
 
 
-class Lesson(Base):
+class Lesson(TenantScoped, Base):
     __tablename__ = "lessons"
     __table_args__ = (UniqueConstraint("module_id", "order_index", name="uq_lesson_module_order"),)
 

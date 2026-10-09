@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.certificate import Certificate
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class CertificateType(Base):
+class CertificateType(TenantScoped, Base):
     __tablename__ = "certificate_types"
     __table_args__ = (
         CheckConstraint(

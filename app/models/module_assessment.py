@@ -8,6 +8,7 @@ from sqlalchemy import ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.assessment_question import AssessmentQuestion
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
     from app.models.user_assessment_attempt import UserAssessmentAttempt
 
 
-class ModuleAssessment(Base):
+class ModuleAssessment(TenantScoped, Base):
     __tablename__ = "module_assessments"
     __table_args__ = (
         UniqueConstraint("module_id", name="module_assessments_module_id_key"),

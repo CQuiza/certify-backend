@@ -1,8 +1,12 @@
-"""Agregador de rutas /api/v1."""
+"""Routers de /api/v1.
 
-from fastapi import APIRouter
+Se exponen como lista plana: cada router se incluye directo sobre la app con
+el prefijo de versión (evita ramas anidadas de `_IncludedRouter` que en
+FastAPI>=0.142 pierden rutas).
+"""
 
 from app.api.v1.endpoints import (
+    admin_tenants,
     auth,
     certificate_audit,
     certificate_types,
@@ -26,26 +30,27 @@ from app.api.v1.endpoints import (
     worker_audit,
 )
 
-api_router = APIRouter()
-
-api_router.include_router(health.router)
-api_router.include_router(auth.router)
-api_router.include_router(users.router)
-api_router.include_router(courses.router)
-api_router.include_router(modules.router)
-api_router.include_router(module_assessments.router)
-api_router.include_router(lessons.router)
-api_router.include_router(lesson_files.router)
-api_router.include_router(user_progress.router)
-api_router.include_router(certificate_types.router)
-api_router.include_router(certificates.router)
-api_router.include_router(certificate_audit.router)
-api_router.include_router(dashboard.router)
-api_router.include_router(configuration.router)
-api_router.include_router(monitoring.router)
-api_router.include_router(course_enrollments.router)
-api_router.include_router(email_audit.router)
-api_router.include_router(tasks.router)
-api_router.include_router(task_submissions.router)
-api_router.include_router(user_audit.router)
-api_router.include_router(worker_audit.router)
+ROUTERS = [
+    health.router,
+    admin_tenants.router,
+    auth.router,
+    users.router,
+    courses.router,
+    modules.router,
+    module_assessments.router,
+    lessons.router,
+    lesson_files.router,
+    user_progress.router,
+    certificate_types.router,
+    certificates.router,
+    certificate_audit.router,
+    dashboard.router,
+    configuration.router,
+    monitoring.router,
+    course_enrollments.router,
+    email_audit.router,
+    tasks.router,
+    task_submissions.router,
+    user_audit.router,
+    worker_audit.router,
+]

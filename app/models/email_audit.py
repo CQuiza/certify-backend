@@ -9,10 +9,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 from app.models.enums import EmailStatus
 
 
-class EmailAudit(Base):
+class EmailAudit(TenantScoped, Base):
     __tablename__ = "email_audit"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

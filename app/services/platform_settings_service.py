@@ -1,8 +1,7 @@
 """Servicio de configuración personalizable de la plataforma.
 
-Reúne organización/marca, configuración SMTP (cifrada) y plantillas de correo,
-todo con mira a la fase multitenancy: cada consulta pasa por ``tenant_key``
-(hoy siempre ``'default'`` via ``get_current_tenant``).
+Todo queda resuelto por el tenant activo del contexto (``core.tenant``); con
+fallback al tenant por defecto para operaciones no scoped (workers, seeds).
 """
 
 from __future__ import annotations
@@ -10,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,15 +16,11 @@ from app.core.crypto import decrypt_secret, encrypt_secret, password_is_set
 from app.core.settings import get_settings
 from app.models.platform_settings import (
     DEFAULT_DASHBOARD_MESSAGE,
-    DEFAULT_TENANT_KEY,
     PlatformSettings,
 )
 from app.repositories.platform_settings_repository import platform_settings_repository
-from app.services.email_template_service import (
-    EmailTemplateService,
-    build_logo_html,
-)
-from app.utils.email_templates import DEFAULT_TEMPLATES
+from app.services.email_template_service import build_logo_html
+from app.services.email_template_service import EmailTemplateService
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +55,17 @@ class EmailContext:
 
 
 class PlatformSettingsService:
+    async def _current_tenant_id(self, db: AsyncSession) -> int:
+        from app.core.tenant import current_tenant_id, resolve_default_tenant_id
+
+        tenant_id = current_tenant_id()
+        if tenant_id is not None:
+            return tenant_id
+        return await resolve_default_tenant_id(db)
+
     async def get_or_create(self, db: AsyncSession) -> PlatformSettings:
-        return await platform_settings_repository.get_or_create(
-            db, DEFAULT_TENANT_KEY
-        )
+        tenant_id = await self._current_tenant_id(db)
+        return await platform_settings_repository.get_or_create(db, tenant_id)
 
     # ── branding / organización ───────────────────────────────
 
@@ -225,6 +226,7 @@ class PlatformSettingsService:
         updated_by: int | None = None,
     ) -> dict:
         from app.repositories.email_template_repository import email_template_repository
+        from app.utils.email_templates import DEFAULT_TEMPLATES
 
         row = await self.get_or_create(db)
         await email_template_repository.upsert(

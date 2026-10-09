@@ -76,13 +76,20 @@ class UserRepository:
         password_hash: str,
         name: str | None,
         first_last_name: str | None,
-        second_last_name: str | None,
+        second_last_name: str | None = None,
         role: str,
         identity_type: str,
         identity_number: str,
         phone_number: str,
         is_active: bool = True,
+        tenant_id: int | None = None,
     ) -> User:
+        if tenant_id is None:
+            from app.core.tenant import current_tenant_id, resolve_default_tenant_id
+
+            tenant_id = current_tenant_id()
+            if tenant_id is None:
+                tenant_id = await resolve_default_tenant_id(db)
         u = User(
             email=email,
             password_hash=password_hash,
@@ -94,6 +101,7 @@ class UserRepository:
             identity_number=identity_number,
             phone_number=phone_number,
             is_active=is_active,
+            tenant_id=tenant_id,
         )
         db.add(u)
         await db.flush()

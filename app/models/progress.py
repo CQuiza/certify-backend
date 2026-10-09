@@ -9,13 +9,14 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.tenant import TenantScoped
 
 if TYPE_CHECKING:
     from app.models.lesson import Lesson
     from app.models.user import User
 
 
-class UserProgress(Base):
+class UserProgress(TenantScoped, Base):
     __tablename__ = "user_progress"
     __table_args__ = (UniqueConstraint("user_id", "lesson_id", name="uq_progress_user_lesson"),)
 
