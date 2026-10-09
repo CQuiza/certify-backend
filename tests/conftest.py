@@ -132,13 +132,15 @@ async def _login(client: AsyncClient, email: str, password: str) -> str:
     return resp.json()["access_token"]
 
 
-@pytest.fixture
-async def superuser_token(client) -> str:
-    return await _login(client, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
+@pytest.fixture(scope="session")
+async def superuser_token() -> str:
+    # El login está limitado a 10/min: se hace una sola vez por sesión.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+        return await _login(ac, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
 
 
-@pytest.fixture
-async def student_token(client) -> str:
+@pytest.fixture(scope="session")
+async def student_token() -> str:
     async with AsyncSessionLocal() as session:
         existing = await session.execute(select(User).where(User.email == STUDENT_EMAIL))
         if existing.scalar_one_or_none() is None:
@@ -156,4 +158,5 @@ async def student_token(client) -> str:
                 )
             )
             await session.commit()
-    return await _login(client, STUDENT_EMAIL, STUDENT_PASSWORD)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+        return await _login(ac, STUDENT_EMAIL, STUDENT_PASSWORD)

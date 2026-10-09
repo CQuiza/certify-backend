@@ -27,13 +27,20 @@ class CourseRepository:
         limit: int = 100,
         teacher_id: int | None = None,
         status: str | None = None,
+        search: str | None = None,
     ) -> Sequence[Course]:
-        q = select(Course).offset(skip).limit(limit)
+        q = select(Course)
         if teacher_id is not None:
             q = q.where(Course.teacher_id == teacher_id)
         if status is not None:
             q = q.where(Course.status == status)
-        r = await db.execute(q.order_by(Course.id))
+        if search:
+            pattern = f"%{search}%"
+            q = q.where(
+                Course.title.ilike(pattern) | Course.description.ilike(pattern)
+            )
+        q = q.order_by(Course.id).offset(skip).limit(limit)
+        r = await db.execute(q)
         return r.scalars().all()
 
     async def create(
