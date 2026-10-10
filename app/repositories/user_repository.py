@@ -189,6 +189,20 @@ class UserRepository:
         r = await db.execute(q.order_by(User.id.desc()))
         return r.scalars().all()
 
+    async def list_admins(
+        self,
+        db: AsyncSession,
+        *,
+        limit: int = 200,
+    ) -> Sequence[User]:
+        r = await db.execute(
+            select(User)
+            .where(User.role.in_(["superuser", "admin"]))
+            .order_by(User.id.desc())
+            .limit(limit)
+        )
+        return r.scalars().all()
+
     async def delete(self, db: AsyncSession, user: User) -> None:
         await db.delete(user)
 
