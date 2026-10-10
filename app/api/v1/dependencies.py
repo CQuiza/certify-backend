@@ -4,11 +4,11 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import get_settings
-from app.core.database import get_db
+from app.core.database import AsyncSessionLocal
 from app.core.security import decode_token
+from app.core.tenant import unscoped_ctx
 from app.models.user import User
 from app.repositories.user_repository import user_repository
 
@@ -54,11 +54,15 @@ def _decode_user_id(token: str) -> int:
 
 
 async def get_current_user(
-    db: Annotated[AsyncSession, Depends(get_db)],
     token: Annotated[str, Depends(get_token_from_request)],
 ) -> User:
     uid = _decode_user_id(token)
-    user = await user_repository.get_by_id(db, uid)
+    # El usuario se carga sin scope de tenant (el id es global) para que el
+    # superuser pueda ejercer en cualquier tenant (impersonación). El bloque
+    # unscoped_ctx restaura el contexto previo al terminar la consulta.
+    async with AsyncSessionLocal() as session:
+        async with unscoped_ctx():
+            user = await user_repository.get_by_id(session, uid)
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -69,7 +73,6 @@ async def get_current_user(
 
 
 async def get_optional_user(
-    db: Annotated[AsyncSession, Depends(get_db)],
     token: Annotated[str | None, Depends(get_optional_token_from_request)],
 ) -> User | None:
     if not token:
@@ -78,7 +81,9 @@ async def get_optional_user(
         uid = _decode_user_id(token)
     except HTTPException:
         return None
-    user = await user_repository.get_by_id(db, uid)
-    if not user or not user.is_active:
+    async with AsyncSessionLocal() as session:
+        async with unscoped_ctx():
+            user = await user_repository.get_by_id(session, uid)
+    if user is None or not user.is_active:
         return None
     return user

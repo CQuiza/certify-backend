@@ -242,8 +242,28 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+_AUTH_PATHS = (
+    "/api/v1/auth/token",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/logout",
+)
+
+
+async def _tenant_is_active(tenant_id: int) -> bool:
+    from sqlalchemy import select
+
+    from app.models.tenant import Tenant
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Tenant.is_active).where(Tenant.id == tenant_id).limit(1)
+        )
+        value = result.scalar_one_or_none()
+        return bool(value)
+
+
 async def _resolve_tenant_from_token(request: Request) -> int | None:
-    """Lee el claim `tenant_id` del JWT (Bearer o cookie)."""
+    """Resuelve el tenant: cookie `acting_tenant` (superuser) o claim del JWT."""
     from app.core.security import decode_token
 
     auth = request.headers.get("Authorization", "")
@@ -254,10 +274,25 @@ async def _resolve_tenant_from_token(request: Request) -> int | None:
         return None
     try:
         payload = decode_token(token)
-        tid = payload.get("tenant_id")
-        return int(tid) if tid else None
     except Exception:
         return None
+
+    # Impersonación: header X-Acting-Tenant o cookie acting_tenant.
+    # Solo superuser y fuera de /auth.
+    path = request.url.path
+    acting = request.headers.get("X-Acting-Tenant")
+    if not acting:
+        acting = request.cookies.get("acting_tenant")
+    if acting and payload.get("role") == "superuser" and path not in _AUTH_PATHS:
+        try:
+            acting_id = int(acting)
+        except (TypeError, ValueError):
+            acting_id = None
+        if acting_id is not None and await _tenant_is_active(acting_id):
+            return acting_id
+
+    tid = payload.get("tenant_id")
+    return int(tid) if tid else None
 
 
 async def _resolve_tenant_from_host(request: Request) -> int | None:

@@ -145,7 +145,7 @@ async def client():
     # Sin lifespan (la app siembra los usuarios en _prepare_db); usamos
     # ASGITransport para ejecutar las rutas en el mismo event-loop de pytest.
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+    async with AsyncClient(transport=transport, base_url="http://app.testserver") as ac:
         yield ac
 
 
@@ -161,7 +161,7 @@ async def _login(client: AsyncClient, email: str, password: str) -> str:
 @pytest.fixture(scope="session")
 async def superuser_token() -> str:
     # El login está limitado a 10/min: se hace una sola vez por sesión.
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://app.testserver") as ac:
         return await _login(ac, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
 
 
@@ -219,7 +219,7 @@ async def student_token() -> str:
                 )
             )
             await session.commit()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://app.testserver") as ac:
         return await _login(ac, STUDENT_EMAIL, STUDENT_PASSWORD)
 
 
@@ -250,5 +250,5 @@ async def teacher_token() -> str:
                 )
             )
             await session.commit()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://app.testserver") as ac:
         return await _login(ac, TEACHER_EMAIL, TEACHER_PASSWORD)

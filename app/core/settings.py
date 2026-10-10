@@ -181,6 +181,11 @@ class Settings(BaseSettings):
             return [p.strip() for p in s.split(",") if p.strip()]
         return v
 
+    @property
+    def cookie_domain(self) -> str | None:
+        """Dominio de cookies (SSO entre subdominios) o None (single-host)."""
+        return self.root_domain or None
+
     def get_database_url(self) -> str:
         """URL de conexión (postgresql://...) construida o explícita."""
         if self.database_url:

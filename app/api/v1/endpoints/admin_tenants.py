@@ -3,12 +3,14 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db_unscoped
+from app.core.settings import get_settings
 from app.models.user import User
 from app.repositories.tenant_repository import tenant_repository
 from app.schemas.tenant import (
@@ -131,3 +133,72 @@ async def reset_tenant_admin_password(
         detail=f"Contraseña reiniciada para {body.admin_email}",
         password=new_password,
     )
+
+
+@router.post("/{tenant_id}/impersonate", status_code=status.HTTP_200_OK)
+async def impersonate_tenant(
+    tenant_id: int,
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> JSONResponse:
+    """El superuser entra a operar dentro de un tenant sin salir de sesión."""
+    _require_superuser(current)
+    tenant = await tenant_repository.get_by_id(db, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+    if not tenant.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El tenant está desactivado")
+
+    settings = get_settings()
+    resp = JSONResponse(
+        content={"detail": "Sesión dirigida al tenant", "tenant_id": tenant.id, "slug": tenant.slug}
+    )
+    resp.set_cookie(
+        key="acting_tenant",
+        value=str(tenant.id),
+        httponly=True,
+        secure=settings.environment == "production",
+        samesite="lax",
+        max_age=8 * 3600,
+        path="/api/v1",
+        domain=settings.cookie_domain,
+    )
+    logger.info("Superuser %s impersonó tenant %s (%s)", current.email, tenant.id, tenant.slug)
+    return resp
+
+
+@router.post("/stop", status_code=status.HTTP_200_OK)
+async def stop_impersonation(
+    current: Annotated[User, Depends(get_current_user)],
+) -> JSONResponse:
+    """Vuelve al tenant de la sesión (limpia la cookie de impersonación)."""
+    settings = get_settings()
+    resp = JSONResponse(content={"detail": "Volviste a tu tenant"})
+    resp.delete_cookie(
+        key="acting_tenant",
+        httponly=True,
+        path="/api/v1",
+        domain=settings.cookie_domain,
+    )
+    return resp
+
+
+@router.get("/acting")
+async def get_acting_tenant(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Devuelve el tenant activo por impersonación (banner del front)."""
+    _require_superuser(current)
+    acting = request.headers.get("X-Acting-Tenant") or request.cookies.get("acting_tenant")
+    if not acting:
+        return {"tenant_id": None, "slug": None}
+    try:
+        tenant_id = int(acting)
+    except (TypeError, ValueError):
+        return {"tenant_id": None, "slug": None}
+    tenant = await tenant_repository.get_by_id(db, tenant_id)
+    if tenant is None or not tenant.is_active:
+        return {"tenant_id": None, "slug": None}
+    return {"tenant_id": tenant.id, "slug": tenant.slug}

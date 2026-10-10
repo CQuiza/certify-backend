@@ -54,7 +54,7 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = create_access_token(
-        subject=user.id, extra_claims={"tenant_id": user.tenant_id}
+        subject=user.id, extra_claims={"tenant_id": user.tenant_id, "role": user.role}
     )
     settings = get_settings()
     refresh_token = generate_refresh_token()
@@ -71,6 +71,7 @@ async def login(
         samesite="lax",
         max_age=settings.access_token_expire_minutes * 60,
         path="/api/v1",
+        domain=settings.cookie_domain,
     )
     return Token(access_token=token, refresh_token=refresh_token)
 
@@ -97,7 +98,7 @@ async def refresh_access_token(
         )
 
     new_access = create_access_token(
-        subject=user.id, extra_claims={"tenant_id": user.tenant_id}
+        subject=user.id, extra_claims={"tenant_id": user.tenant_id, "role": user.role}
     )
     new_refresh = generate_refresh_token()
     user.refresh_token_hash = hash_refresh_token(new_refresh)
@@ -116,6 +117,7 @@ async def refresh_access_token(
         samesite="lax",
         max_age=settings.access_token_expire_minutes * 60,
         path="/api/v1",
+        domain=settings.cookie_domain,
     )
     return resp
 
@@ -131,7 +133,8 @@ async def logout(
     await db.flush()
     settings = get_settings()
     resp = JSONResponse(content={"message": "Sesión cerrada"})
-    resp.delete_cookie(key="access_token", httponly=True, path="/api/v1")
+    resp.delete_cookie(key="access_token", httponly=True, path="/api/v1", domain=settings.cookie_domain)
+    resp.delete_cookie(key="acting_tenant", httponly=True, path="/api/v1", domain=settings.cookie_domain)
     return resp
 
 
