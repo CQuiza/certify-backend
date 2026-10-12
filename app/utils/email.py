@@ -182,6 +182,27 @@ async def send_certificate_expired_email(
     )
 
 
+async def send_purchase_confirmation_email(
+    email_to: str,
+    student_name: str,
+    course_titles: list[str],
+    total: float,
+    tenant_id: int | None = None,
+) -> None:
+    """Envía confirmación de compra de cursos (webhook de pago)."""
+    await _dispatch(
+        "purchase_confirmation",
+        [email_to],
+        {
+            "student_name": student_name,
+            "courses": ", ".join(course_titles),
+            "total": f"{total:,.2f}",
+        },
+        email_to,
+        tenant_id=tenant_id,
+    )
+
+
 async def send_test_email(email_to: str) -> None:
     """Envía un correo de prueba usando la configuración SMTP efectiva."""
     try:

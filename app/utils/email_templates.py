@@ -51,6 +51,21 @@ DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
 </body>
 </html>""",
     },
+    "purchase_confirmation": {
+        "subject": "Compra confirmada — {{app_name}}",
+        "body_html": """<html>
+<body style="font-family: Arial, sans-serif; padding: 20px;">
+    {{logo}}
+    <h2>¡Compra confirmada!</h2>
+    <p>Hola <strong>{{student_name}}</strong>,</p>
+    <p>Gracias por tu compra. Ya tienes acceso a los siguientes cursos:</p>
+    <p><strong>{{courses}}</strong></p>
+    <p>Total pagado: <strong>{{total}}</strong></p>
+    <p>Tu certificado queda <em>en proceso</em> y se emitirá cuando completes el curso al 100%.</p>
+    <p style="color:#6b7280; font-size:12px;">{{organization_name}}</p>
+</body>
+</html>""",
+    },
 }
 
 #: Descripción de placeholders disponibles para mostrar en la UI.
@@ -64,4 +79,6 @@ PLACEHOLDERS: dict[str, str] = {
     "verify_link": "Enlace de verificación del certificado",
     "certificate_type": "Línea con el tipo de certificado (solo emitido)",
     "logo": "Logo de la organización (imagen inline)",
+    "courses": "Cursos comprados (separados por coma)",
+    "total": "Total pagado",
 }

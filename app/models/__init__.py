@@ -28,6 +28,7 @@ from app.models.module import Module
 from app.models.module_assessment import ModuleAssessment
 from app.models.pending_certificate import PendingCertificate
 from app.models.platform_settings import PlatformSettings
+from app.models.payment import CourseOrder, CourseOrderItem
 from app.models.progress import UserProgress
 from app.models.system_log import SystemLog
 from app.models.tenant import Tenant
@@ -48,6 +49,8 @@ __all__ = [
     "CertificateTypeKind",
     "Course",
     "CourseEnrollment",
+    "CourseOrder",
+    "CourseOrderItem",
     "CourseStatus",
     "EmailAudit",
     "EmailTemplate",

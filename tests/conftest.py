@@ -95,6 +95,12 @@ async def _seed_user(
 async def _prepare_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # WAL: evita "database is locked" mezclando lecturas y escrituras (solo tests).
+    from sqlalchemy import text
+
+    async with engine.connect() as conn:
+        await conn.execute(text("PRAGMA journal_mode=WAL"))
+        await conn.execute(text("PRAGMA busy_timeout=15000"))
     default_id = await _default_tenant_id()
     await _seed_user(
         email=SUPERUSER_EMAIL,
@@ -244,7 +250,7 @@ async def teacher_token() -> str:
                     role="teacher",
                     identity_type="CC",
                     identity_number="7070707070",
-                    phone_number="+570000000077",
+                    phone_number="+570000000070",
                     is_active=True,
                     tenant_id=default_id,
                 )

@@ -62,6 +62,8 @@ async def create_course(
             certificate_type_id=body.certificate_type_id,
             teacher_id=current.id,
             status=body.status.value,
+            price=body.price,
+            is_for_sale=body.is_for_sale,
         )
     if not is_super_or_admin(current):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores o docentes")
@@ -72,6 +74,8 @@ async def create_course(
         certificate_type_id=body.certificate_type_id,
         teacher_id=body.teacher_id,
         status=body.status.value,
+        price=body.price,
+        is_for_sale=body.is_for_sale,
     )
 
 

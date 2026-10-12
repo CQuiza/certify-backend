@@ -153,6 +153,13 @@ class Settings(BaseSettings):
     root_domain: str = Field(default="", alias="ROOT_DOMAIN")
     default_tenant_slug: str = Field(default="default", alias="DEFAULT_TENANT_SLUG")
 
+    # Mercado Pago (compra de cursos)
+    mercadopago_access_token: str = Field(default="", alias="MERCADOPAGO_ACCESS_TOKEN")
+    mercadopago_public_key: str = Field(default="", alias="MERCADOPAGO_PUBLIC_KEY")
+    mercadopago_webhook_secret: str = Field(default="", alias="MERCADOPAGO_WEBHOOK_SECRET")
+    payments_enabled: bool = Field(default=False, alias="PAYMENTS_ENABLED")
+    payments_currency: str = Field(default="COP", alias="PAYMENTS_CURRENCY")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors(cls, v: object) -> object:

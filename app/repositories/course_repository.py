@@ -52,6 +52,8 @@ class CourseRepository:
         certificate_type_id: int | None,
         teacher_id: int | None,
         status: str,
+        price=None,
+        is_for_sale: bool = False,
     ) -> Course:
         c = Course(
             title=title,
@@ -59,6 +61,8 @@ class CourseRepository:
             certificate_type_id=certificate_type_id,
             teacher_id=teacher_id,
             status=status,
+            price=price,
+            is_for_sale=is_for_sale,
         )
         db.add(c)
         await db.flush()
@@ -66,7 +70,7 @@ class CourseRepository:
         return c
 
     async def update(self, db: AsyncSession, course: Course, fields: dict[str, object]) -> Course:
-        allowed = {"title", "description", "certificate_type_id", "teacher_id", "status"}
+        allowed = {"title", "description", "certificate_type_id", "teacher_id", "status", "price", "is_for_sale"}
         for k, v in fields.items():
             if k in allowed:
                 setattr(course, k, v)

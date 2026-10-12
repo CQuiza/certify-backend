@@ -138,7 +138,7 @@ async def test_email_templates_list_and_update(client, superuser_token):
     lst = await client.get("/api/v1/configuration/email/templates", headers=headers)
     assert lst.status_code == 200
     body = lst.json()
-    assert len(body["items"]) == 3
+    assert len(body["items"]) == 4  # credenciales, emitido, expirado, compra
     assert "placeholders" in body
     assert "student_name" in body["placeholders"]
 

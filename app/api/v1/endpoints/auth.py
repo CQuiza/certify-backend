@@ -1,11 +1,13 @@
-"""OAuth2 password flow (token + refresh)."""
+"""OAuth2 password flow (token + refresh) y registro público de estudiantes."""
 
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,8 +17,10 @@ from app.core.rate_limit import limiter
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
+    get_password_hash,
     hash_refresh_token,
     refresh_token_expires_at,
+    validate_password_strength,
 )
 from app.core.settings import get_settings
 from app.models.user import User
@@ -26,6 +30,77 @@ from app.schemas.user import UserRead
 from app.services.user_service import user_service
 
 router = APIRouter(tags=["auth"])
+
+logger = logging.getLogger(__name__)
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    name: str = Field(..., max_length=255)
+    first_last_name: str = Field(default="", max_length=255)
+    second_last_name: str | None = Field(default=None, max_length=255)
+    identity_type: str = "CC"
+    identity_number: str = Field(..., max_length=50)
+    phone_number: str = Field(..., max_length=20)
+
+
+@router.post("/auth/register", status_code=status.HTTP_201_CREATED, response_model=Token)
+@limiter.limit("5/minute")
+async def register_student(
+    request: Request,
+    response: Response,
+    body: RegisterRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Token:
+    """Registro público de estudiantes (compra autónoma)."""
+    email = str(body.email).strip().lower()
+    if await user_repository.get_by_email(db, email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El correo ya está registrado")
+    if await user_repository.get_by_identity_number(db, body.identity_number):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El número de identidad ya está registrado")
+    if await user_repository.get_by_phone_number(db, body.phone_number):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El teléfono ya está registrado")
+
+    pw_errors = validate_password_strength(body.password)
+    if pw_errors:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="; ".join(pw_errors))
+
+    user = await user_repository.create(
+        db,
+        email=email,
+        password_hash=get_password_hash(body.password),
+        name=body.name.strip(),
+        first_last_name=body.first_last_name.strip() or None,
+        second_last_name=body.second_last_name,
+        role="student",
+        identity_type=body.identity_type,
+        identity_number=body.identity_number,
+        phone_number=body.phone_number,
+    )
+
+    token = create_access_token(
+        subject=user.id, extra_claims={"tenant_id": user.tenant_id, "role": user.role}
+    )
+    refresh_token = generate_refresh_token()
+    user.refresh_token_hash = hash_refresh_token(refresh_token)
+    user.refresh_token_expires_at = refresh_token_expires_at()
+    db.add(user)
+    await db.flush()
+
+    settings = get_settings()
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=settings.environment == "production",
+        samesite="lax",
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/api/v1",
+        domain=settings.cookie_domain,
+    )
+    logger.info("Estudiante registrado — id=%s email=%s", user.id, user.email)
+    return Token(access_token=token, refresh_token=refresh_token)
 
 
 @router.post("/auth/token", response_model=Token, summary="Obtener token OAuth2")

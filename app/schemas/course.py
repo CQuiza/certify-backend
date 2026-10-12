@@ -1,6 +1,7 @@
 """Curso."""
 
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,6 +14,8 @@ class CourseCreate(BaseModel):
     certificate_type_id: int | None = None
     teacher_id: int | None = None
     status: CourseStatus = CourseStatus.draft
+    price: Decimal = Decimal("0")
+    is_for_sale: bool = False
 
 
 class CourseUpdate(BaseModel):
@@ -21,6 +24,8 @@ class CourseUpdate(BaseModel):
     certificate_type_id: int | None = None
     teacher_id: int | None = None
     status: CourseStatus | None = None
+    price: Decimal | None = None
+    is_for_sale: bool | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -34,6 +39,8 @@ class CourseRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     status: CourseStatus
+    price: Decimal | None = None
+    is_for_sale: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,5 +52,7 @@ class CoursePublicRead(BaseModel):
     title: str
     description: str | None
     status: CourseStatus
+    price: Decimal | None = None
+    is_for_sale: bool = False
 
     model_config = ConfigDict(from_attributes=True)

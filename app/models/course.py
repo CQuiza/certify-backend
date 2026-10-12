@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -57,6 +60,10 @@ class Course(TenantScoped, Base):
     )
     status: Mapped[str] = mapped_column(
         String(20), default="draft", server_default="draft"
+    )
+    price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=0)
+    is_for_sale: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
     )
 
     teacher: Mapped[User | None] = relationship(
