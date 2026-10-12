@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
 from app.models.user import User
-from app.services.report_service import REPORTS, catalog, parse_range
+from app.services.report_service import REPORTS, catalog, chart_for, parse_range
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ async def run_report(
         "title": meta["title"],
         "columns": columns,
         "rows": rows,
+        "chart": chart_for(report_key),
     }
 
 

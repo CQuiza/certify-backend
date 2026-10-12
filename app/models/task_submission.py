@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -36,8 +47,20 @@ class TaskSubmission(TenantScoped, Base):
         server_default=func.now(),
     )
 
+    # ── Calificación y trazabilidad ───────────────────────────
+    score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    feedback: Mapped[str | None] = mapped_column(Text)
+    passed: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    graded_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    graded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     task: Mapped[LessonTask] = relationship("LessonTask", backref="submissions")
-    user: Mapped[User] = relationship("User", backref="task_submissions")
+    user: Mapped[User] = relationship("User", backref="task_submissions", foreign_keys=[user_id])
+    grader: Mapped[User | None] = relationship("User", foreign_keys=[graded_by])
 
     __table_args__ = (
         UniqueConstraint("task_id", "user_id", name="_task_user_uc"),

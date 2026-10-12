@@ -79,6 +79,23 @@ class TaskSubmissionRepository:
         await db.refresh(sub)
         return sub
 
+    async def update(
+        self, db: AsyncSession, submission: TaskSubmission, fields: dict[str, object]
+    ) -> TaskSubmission:
+        allowed = {
+            "score",
+            "feedback",
+            "passed",
+            "graded_by",
+            "graded_at",
+        }
+        for k, v in fields.items():
+            if k in allowed:
+                setattr(submission, k, v)
+        await db.flush()
+        await db.refresh(submission)
+        return submission
+
     async def delete(self, db: AsyncSession, submission: TaskSubmission) -> None:
         await db.delete(submission)
 

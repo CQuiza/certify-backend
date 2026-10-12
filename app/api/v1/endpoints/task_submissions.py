@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import re
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
@@ -17,11 +19,17 @@ from app.core.settings import get_settings
 from app.models.course import CourseEnrollment
 from app.models.lesson import Lesson
 from app.models.lesson_task import LessonTask
+from app.models.task_submission import TaskSubmission
 from app.models.user import User
+from app.repositories.course_repository import course_repository
 from app.repositories.lesson_task_repository import lesson_task_repository
 from app.repositories.module_repository import module_repository
 from app.repositories.task_submission_repository import task_submission_repository
-from app.schemas.task_submission import TaskSubmissionRead, TaskSubmissionWithUserRead
+from app.schemas.task_submission import (
+    GradeRequest,
+    TaskSubmissionRead,
+    TaskSubmissionWithUserRead,
+)
 from app.services.access import is_super_or_admin, is_teacher, require_course_visible
 from app.utils.minio_client import get_minio_client
 
@@ -53,6 +61,29 @@ async def _assert_enrolled_in_task_course(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No estás inscrito en este curso",
+        )
+
+
+async def _assert_can_grade(db: AsyncSession, current: User, submission: TaskSubmission) -> None:
+    """Docente dueño del curso / admin / superuser pueden calificar."""
+    task = await lesson_task_repository.get_by_id(db, submission.task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarea no encontrada")
+    lesson = (
+        await db.execute(select(Lesson).where(Lesson.id == task.lesson_id))
+    ).scalar_one_or_none()
+    mod = await module_repository.get_by_id(db, lesson.module_id) if lesson else None
+    course = await course_repository.get_by_id(db, mod.course_id) if mod else None
+    if is_teacher(current):
+        if not course or course.teacher_id != current.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Solo el docente del curso puede calificar esta entrega",
+            )
+    elif not is_super_or_admin(current):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sin permiso para calificar",
         )
 
 
@@ -199,11 +230,49 @@ async def list_submissions(
                 original_filename=s.original_filename,
                 mime_type=s.mime_type,
                 submitted_at=s.submitted_at,
+                score=s.score,
+                feedback=s.feedback,
+                passed=bool(s.passed),
+                graded_by=s.graded_by,
+                graded_at=s.graded_at,
                 user_name=s.user.name,
                 user_email=s.user.email,
+                grader_name=(s.grader.name if s.grader else None),
             )
         )
     return result
+
+
+@router.patch(
+    "/submissions/{submission_id}/grade",
+    response_model=TaskSubmissionRead,
+)
+async def grade_submission(
+    submission_id: int,
+    body: GradeRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> object:
+    sub = await task_submission_repository.get_by_id(db, submission_id)
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entrega no encontrada")
+
+    await _assert_can_grade(db, current, sub)
+
+    updated = await task_submission_repository.update(
+        db,
+        sub,
+        {
+            "score": Decimal(str(body.score)),
+            "feedback": (body.feedback or "").strip() or None,
+            "passed": body.score >= 70,
+            "graded_by": current.id,
+            "graded_at": datetime.now(timezone.utc),
+        },
+    )
+    await db.commit()
+    logger.info("Entrega calificada — submission=%s score=%s by=%s", submission_id, body.score, current.id)
+    return updated
 
 
 @router.get("/tasks/{task_id}/my-submission")

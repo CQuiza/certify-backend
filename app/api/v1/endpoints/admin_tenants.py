@@ -4,7 +4,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -202,3 +202,86 @@ async def get_acting_tenant(
     if tenant is None or not tenant.is_active:
         return {"tenant_id": None, "slug": None}
     return {"tenant_id": tenant.id, "slug": tenant.slug}
+
+
+@router.get("/{tenant_id}/backup-sql")
+async def download_tenant_backup(
+    tenant_id: int,
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> StreamingResponse:
+    """Descarga un backup SQL completo de la base de datos (superuser).
+
+    Es un dump de TODA la base (single-schema multi-tenant). Solo Postgres.
+    """
+    _require_superuser(current)
+    tenant = await tenant_repository.get_by_id(db, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    settings = get_settings()
+    url = settings.get_database_url()
+    if not url.startswith("postgresql") and not url.startswith("postgres"):
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Backup SQL solo disponible con PostgreSQL",
+        )
+
+    host = settings.postgres_host or settings.postgres_host
+    port = settings.postgres_port or 5432
+    user = settings.postgres_user
+    password = settings.postgres_password
+    database = settings.postgres_db
+    if not (user and database):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credenciales de PostgreSQL incompletas en el entorno",
+        )
+
+    import asyncio
+    import os
+    import subprocess
+
+    env = os.environ.copy()
+    if password:
+        env["PGPASSWORD"] = password
+
+    cmd = [
+        "pg_dump",
+        "-h", str(host),
+        "-p", str(port),
+        "-U", str(user),
+        "-d", str(database),
+        "--no-owner",
+        "--no-privileges",
+    ]
+
+    def _run() -> bytes:
+        result = subprocess.run(cmd, env=env, capture_output=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                result.stderr.decode("utf-8", errors="replace")[:500]
+            )
+        return result.stdout
+
+    try:
+        data = await asyncio.to_thread(_run)
+    except Exception as exc:
+        logger.exception("pg_dump falló — tenant=%s", tenant_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Falló el backup: {exc}",
+        ) from exc
+
+    from datetime import datetime, timezone
+
+    from urllib.parse import quote
+
+    now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"backup_{database}_{now}.sql"
+    logger.info("Backup SQL descargado — tenant=%s by=%s size=%s", tenant_id, current.email, len(data))
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/sql",
+        headers={"Content-Disposition": f'attachment; filename*=UTF-8\'\'{quote(filename)}'},
+    )

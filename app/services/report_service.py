@@ -379,6 +379,123 @@ async def _task_submissions_rate(db, start, end, limit) -> list[dict]:
     return sorted(out, key=lambda x: x["porcentaje_entrega"], reverse=True)[:limit]
 
 
+async def _assessment_attempts_history(db, start, end, limit) -> list[dict]:
+    """Historial de intentos de evaluaciones (fecha, n° intento, nota, etc.)."""
+    student = aliased(User)
+    stmt = (
+        select(
+            UserAssessmentAttempt.started_at,
+            UserAssessmentAttempt.finished_at,
+            UserAssessmentAttempt.score,
+            UserAssessmentAttempt.passed,
+            UserAssessmentAttempt.assessment_id,
+            UserAssessmentAttempt.user_id,
+            ModuleAssessment.passing_score,
+            Course.title,
+            Module.title,
+            student.name,
+            student.first_last_name,
+            student.identity_number,
+            student.email,
+        )
+        .select_from(UserAssessmentAttempt)
+        .join(ModuleAssessment, UserAssessmentAttempt.assessment_id == ModuleAssessment.id)
+        .join(Module, ModuleAssessment.module_id == Module.id)
+        .join(Course, Module.course_id == Course.id)
+        .join(student, UserAssessmentAttempt.user_id == student.id)
+    )
+    if start is not None:
+        stmt = stmt.where(UserAssessmentAttempt.finished_at >= start)
+    if end is not None:
+        stmt = stmt.where(UserAssessmentAttempt.finished_at <= end)
+    stmt = stmt.order_by(UserAssessmentAttempt.started_at.asc()).limit(limit)
+    rows = (await db.execute(stmt)).all()
+
+    counts: dict[tuple[int, int], int] = {}
+    out: list[dict] = []
+    for r in rows:
+        key = (r[5], r[4])  # (user_id, assessment_id)
+        counts[key] = counts.get(key, 0) + 1
+        duration_min = None
+        if r[0] and r[1]:
+            duration_min = round((r[1] - r[0]).total_seconds() / 60, 1)
+        student_name = " ".join(p for p in (r[9], r[10]) if p) or (r[12] or "—")
+        out.append(
+            {
+                "fecha": r[1].isoformat() if r[1] else (r[0].isoformat() if r[0] else None),
+                "estudiante": student_name,
+                "identidad": r[11],
+                "correo": r[12],
+                "curso": r[7],
+                "modulo": r[8],
+                "intento": counts[key],
+                "nota": float(r[2]) if r[2] is not None else None,
+                "aprobada": bool(r[3]),
+                "nota_minima": r[6],
+                "duracion_min": duration_min,
+            }
+        )
+    return sorted(out, key=lambda x: x["fecha"] or "", reverse=True)
+
+
+async def _task_grades(db, start, end, limit) -> list[dict]:
+    """Trazabilidad y calificaciones de entregas de tareas."""
+    student = aliased(User)
+    grader = aliased(User)
+    stmt = (
+        select(
+            TaskSubmission.submitted_at,
+            TaskSubmission.score,
+            TaskSubmission.feedback,
+            TaskSubmission.passed,
+            TaskSubmission.graded_at,
+            LessonTask.title,
+            Lesson.title,
+            Course.title,
+            student.name,
+            student.first_last_name,
+            student.identity_number,
+            student.email,
+            grader.name,
+            grader.first_last_name,
+        )
+        .select_from(TaskSubmission)
+        .join(LessonTask, TaskSubmission.task_id == LessonTask.id)
+        .join(Lesson, LessonTask.lesson_id == Lesson.id)
+        .join(Module, Lesson.module_id == Module.id)
+        .join(Course, Module.course_id == Course.id)
+        .join(student, TaskSubmission.user_id == student.id)
+        .outerjoin(grader, TaskSubmission.graded_by == grader.id)
+    )
+    if start is not None:
+        stmt = stmt.where(TaskSubmission.submitted_at >= start)
+    if end is not None:
+        stmt = stmt.where(TaskSubmission.submitted_at <= end)
+    stmt = stmt.order_by(TaskSubmission.submitted_at.desc()).limit(limit)
+    rows = (await db.execute(stmt)).all()
+    out = []
+    for r in rows:
+        student_name = " ".join(p for p in (r[8], r[9]) if p) or (r[11] or "—")
+        grader_name = " ".join(p for p in (r[12], r[13]) if p)
+        out.append(
+            {
+                "fecha_entrega": r[0].isoformat() if r[0] else None,
+                "estudiante": student_name,
+                "identidad": r[10],
+                "correo": r[11],
+                "curso": r[7],
+                "leccion": r[6],
+                "tarea": r[5],
+                "nota": float(r[1]) if r[1] is not None else None,
+                "aprobada": bool(r[3]),
+                "feedback": r[2],
+                "calificado_por": grader_name or None,
+                "fecha_calificacion": r[4].isoformat() if r[4] else None,
+            }
+        )
+    return out
+
+
 # ── Registro / metadatos ────────────────────────────────────
 
 REPORTS: dict[str, dict] = {
@@ -505,7 +622,78 @@ REPORTS: dict[str, dict] = {
         ],
         "fn": _activity_monthly,
     },
+    "assessment_attempts_history": {
+        "title": "Historial de intentos de evaluaciones",
+        "description": "Cada intento de evaluación: fecha, número de intento, calificación, aprobada y notas mínima.",
+        "columns": [
+            {"key": "fecha", "label": "Fecha"},
+            {"key": "estudiante", "label": "Estudiante"},
+            {"key": "identidad", "label": "Documento"},
+            {"key": "correo", "label": "Correo"},
+            {"key": "curso", "label": "Curso"},
+            {"key": "modulo", "label": "Módulo"},
+            {"key": "intento", "label": "N° intento"},
+            {"key": "nota", "label": "Nota"},
+            {"key": "aprobada", "label": "¿Aprobó?"},
+            {"key": "nota_minima", "label": "Nota mínima"},
+            {"key": "duracion_min", "label": "Duración (min)"},
+        ],
+        "fn": _assessment_attempts_history,
+    },
+    "task_grades": {
+        "title": "Calificaciones y trazabilidad de tareas",
+        "description": "Entregas de tareas con nota, feedback y quién/cuándo calificó.",
+        "columns": [
+            {"key": "fecha_entrega", "label": "Fecha entrega"},
+            {"key": "estudiante", "label": "Estudiante"},
+            {"key": "identidad", "label": "Documento"},
+            {"key": "correo", "label": "Correo"},
+            {"key": "curso", "label": "Curso"},
+            {"key": "leccion", "label": "Lección"},
+            {"key": "tarea", "label": "Tarea"},
+            {"key": "nota", "label": "Nota"},
+            {"key": "aprobada", "label": "¿Aprobó?"},
+            {"key": "feedback", "label": "Feedback"},
+            {"key": "calificado_por", "label": "Calificado por"},
+            {"key": "fecha_calificacion", "label": "Fecha calificación"},
+        ],
+        "fn": _task_grades,
+    },
 }
+
+
+# ── Configuración de gráficas por reporte ────────────────────
+
+CHARTS: dict[str, dict] = {
+    "certificates_by_admin": {"kind": "bar", "x": "admin", "count": True},
+    "certificates_by_type": {"kind": "pie", "x": "tipo", "numericKeys": ["total"]},
+    "content_by_teacher": {
+        "kind": "bar",
+        "x": "docente",
+        "numericKeys": ["cursos", "modulos", "lecciones", "evaluaciones", "tareas"],
+    },
+    "courses_assigned_by_user": {"kind": "bar", "x": "estudiante", "numericKeys": ["total_cursos"]},
+    "users_by_role": {"kind": "pie", "x": "rol", "numericKeys": ["cantidad"]},
+    "assessment_results": {
+        "kind": "bar",
+        "x": "modulo",
+        "numericKeys": ["intentos", "promedio", "aprobados", "porcentaje_aprobacion"],
+    },
+    "certificates_status_flow": {"kind": "pie", "x": "accion", "numericKeys": ["cantidad"]},
+    "top_courses": {"kind": "bar", "x": "curso", "numericKeys": ["inscritos"]},
+    "task_submissions_rate": {"kind": "bar", "x": "curso", "numericKeys": ["porcentaje_entrega"]},
+    "activity_monthly": {
+        "kind": "line",
+        "x": "mes",
+        "numericKeys": ["certificados", "inscripciones", "usuarios"],
+    },
+    "assessment_attempts_history": {"kind": "line", "x": "fecha", "numericKeys": ["nota"]},
+    "task_grades": {"kind": "bar", "x": "tarea", "numericKeys": ["nota"]},
+}
+
+
+def chart_for(key: str) -> dict:
+    return CHARTS.get(key, {"kind": "bar", "x": None, "numericKeys": []})
 
 
 def catalog() -> list[dict]:
@@ -515,6 +703,7 @@ def catalog() -> list[dict]:
             "title": meta["title"],
             "description": meta["description"],
             "columns": meta["columns"],
+            "chart": chart_for(key),
         }
         for key, meta in REPORTS.items()
     ]
