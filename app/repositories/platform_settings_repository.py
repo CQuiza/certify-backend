@@ -40,6 +40,8 @@ class PlatformSettingsRepository:
             "smtp_tls",
             "email_from",
             "email_from_name",
+            "mercadopago_enabled",
+            "mercadopago_marketplace_user_id",
             "updated_by",
         }
         for k, v in fields.items():

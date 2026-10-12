@@ -179,6 +179,34 @@ async def test_email_template_restore(client, superuser_token):
 
 
 @pytest.mark.asyncio
+async def test_payments_settings_superuser_only(client, superuser_token, student_token):
+    headers = _auth_headers(superuser_token)
+
+    got = await client.get("/api/v1/configuration/payments", headers=headers)
+    assert got.status_code == 200, got.text
+    assert got.json()["mercadopago_enabled"] is False
+    assert got.json()["currency"] == "COP"
+
+    denied = await client.get("/api/v1/configuration/payments", headers=_auth_headers(student_token))
+    assert denied.status_code == 403
+
+    put = await client.put(
+        "/api/v1/configuration/payments",
+        headers=headers,
+        json={"mercadopago_enabled": True, "mercadopago_marketplace_user_id": "MP_USER_1"},
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["mercadopago_enabled"] is True
+    assert put.json()["mercadopago_marketplace_user_id"] == "MP_USER_1"
+
+
+@pytest.mark.asyncio
+async def test_payments_settings_auth_required(client):
+    resp = await client.get("/api/v1/configuration/payments")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_upload_logo_validates_image(client, superuser_token):
     resp = await client.post(
         "/api/v1/configuration/email/logo",

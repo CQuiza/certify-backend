@@ -31,6 +31,8 @@ from app.schemas.platform_settings import (
     EmailTemplateUpdate,
     EmailTemplatesListRead,
     OrganizationUpdate,
+    PaymentsSettingsRead,
+    PaymentsSettingsUpdate,
     TestEmailRequest,
 )
 from app.services.email_template_service import get_placeholders
@@ -150,6 +152,32 @@ async def update_email_settings(
         smtp_tls=body.smtp_tls,
         email_from=body.email_from,
         email_from_name=body.email_from_name,
+        updated_by=current.id,
+    )
+
+
+@router.get("/payments", response_model=PaymentsSettingsRead)
+async def get_payments_settings(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Configuración de ventas (Mercado Pago marketplace) del tenant."""
+    _require_superuser(current)
+    return await platform_settings_service.get_payments_settings(db)
+
+
+@router.put("/payments", response_model=PaymentsSettingsRead)
+async def update_payments_settings(
+    body: PaymentsSettingsUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Activa la venta del tenant y su ID de vendedor (Marketplace User ID)."""
+    _require_superuser(current)
+    return await platform_settings_service.save_payments_settings(
+        db,
+        mercadopago_enabled=body.mercadopago_enabled,
+        mercadopago_marketplace_user_id=body.mercadopago_marketplace_user_id,
         updated_by=current.id,
     )
 

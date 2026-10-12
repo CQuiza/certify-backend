@@ -79,3 +79,16 @@ class EmailTemplatesListRead(BaseModel):
 
 class TestEmailRequest(BaseModel):
     email_to: EmailStr
+
+
+class PaymentsSettingsRead(BaseModel):
+    mercadopago_enabled: bool
+    mercadopago_marketplace_user_id: str | None
+    commission_percent: float = 0.0
+    commission_fixed: str = "0"
+    currency: str = "COP"
+
+
+class PaymentsSettingsUpdate(BaseModel):
+    mercadopago_enabled: bool = False
+    mercadopago_marketplace_user_id: str | None = Field(default=None, max_length=50)

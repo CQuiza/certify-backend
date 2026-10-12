@@ -61,6 +61,12 @@ class PlatformSettings(Base):
     email_from: Mapped[str | None] = mapped_column(String(255))
     email_from_name: Mapped[str | None] = mapped_column(String(255))
 
+    # ── Ventas / Mercado Pago (marketplace split) ──────────────
+    mercadopago_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    mercadopago_marketplace_user_id: Mapped[str | None] = mapped_column(String(50))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

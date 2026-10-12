@@ -28,20 +28,45 @@ class PaymentsDisabledError(RuntimeError):
     pass
 
 
+class TenantPaymentsDisabledError(RuntimeError):
+    pass
+
+
 def payments_configured() -> bool:
     settings = get_settings()
     return bool(settings.payments_enabled and settings.mercadopago_access_token)
 
 
+def _platform_commission(order_total: float) -> float:
+    """Comisión global de la plataforma (split): % + monto fijo."""
+    settings = get_settings()
+    percent = float(settings.platform_commission_percent or 0.0)
+    fixed = float(settings.platform_commission_fixed or 0.0)
+    return round(order_total * percent / 100.0, 2) + fixed
+
+
 async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str, api_prefix: str) -> tuple[str, str]:
-    """Crea la preferencia de Checkout Pro y devuelve (init_point, external_id)."""
+    """Crea la preferencia de Checkout Pro con split de marketplace y devuelve (init_point, external_id)."""
     from sqlalchemy import select
 
     from app.models.payment import CourseOrderItem
+    from app.models.platform_settings import PlatformSettings
 
     settings = get_settings()
     if not payments_configured():
         raise PaymentsDisabledError("Pagos no configurados")
+
+    tenant_settings = (
+        await db.execute(select(PlatformSettings).where(PlatformSettings.tenant_id == order.tenant_id))
+    ).scalar_one_or_none()
+    if (
+        tenant_settings is None
+        or not tenant_settings.mercadopago_enabled
+        or not tenant_settings.mercadopago_marketplace_user_id
+    ):
+        raise TenantPaymentsDisabledError(
+            "El pago en línea no está habilitado para esta organización"
+        )
 
     rows = (
         await db.execute(
@@ -60,6 +85,8 @@ async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str,
             }
         )
 
+    fee_amount = _platform_commission(float(order.total))
+
     back = settings.base_url.rstrip("/")
     payload = {
         "items": items,
@@ -72,6 +99,9 @@ async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str,
             "failure": f"{back}/payments/order/{order.id}?status=failure",
         },
         "statement_descriptor": "Certify",
+        # Split de pagos: la plataforma retiene su comisión; el resto va al tenant.
+        "marketplace": tenant_settings.mercadopago_marketplace_user_id,
+        "application_fee": fee_amount,
     }
     headers = {
         "Authorization": f"Bearer {settings.mercadopago_access_token}",

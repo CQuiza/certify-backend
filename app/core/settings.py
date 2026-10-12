@@ -159,6 +159,9 @@ class Settings(BaseSettings):
     mercadopago_webhook_secret: str = Field(default="", alias="MERCADOPAGO_WEBHOOK_SECRET")
     payments_enabled: bool = Field(default=False, alias="PAYMENTS_ENABLED")
     payments_currency: str = Field(default="COP", alias="PAYMENTS_CURRENCY")
+    # Comisión de la plataforma por venta (split automático de Mercado Pago).
+    platform_commission_percent: float = Field(default=0.0, alias="PLATFORM_COMMISSION_PERCENT")
+    platform_commission_fixed: str = Field(default="0", alias="PLATFORM_COMMISSION_FIXED")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

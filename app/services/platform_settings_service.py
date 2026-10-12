@@ -190,7 +190,42 @@ class PlatformSettingsService:
 
         return None
 
-    # ── plantillas ────────────────────────────────────────────
+    # ── ventas / Mercado Pago (marketplace split) ────────────
+
+    async def get_payments_settings(self, db: AsyncSession) -> dict:
+        row = await self.get_or_create(db)
+        settings = get_settings()
+        return {
+            "mercadopago_enabled": bool(row.mercadopago_enabled),
+            "mercadopago_marketplace_user_id": row.mercadopago_marketplace_user_id,
+            "commission_percent": settings.platform_commission_percent,
+            "commission_fixed": settings.platform_commission_fixed,
+            "currency": settings.payments_currency,
+        }
+
+    async def save_payments_settings(
+        self,
+        db: AsyncSession,
+        *,
+        mercadopago_enabled: bool,
+        mercadopago_marketplace_user_id: str | None,
+        updated_by: int | None = None,
+    ) -> dict:
+        row = await self.get_or_create(db)
+        await platform_settings_repository.update(
+            db,
+            row,
+            {
+                "mercadopago_enabled": bool(mercadopago_enabled),
+                "mercadopago_marketplace_user_id": (
+                    mercadopago_marketplace_user_id or ""
+                ).strip()
+                or None,
+                "updated_by": updated_by,
+            },
+        )
+        logger.info("Configuración de pagos actualizada — by=%s", updated_by)
+        return await self.get_payments_settings(db)
 
     async def list_email_templates(self, db: AsyncSession) -> list[dict]:
         row = await self.get_or_create(db)

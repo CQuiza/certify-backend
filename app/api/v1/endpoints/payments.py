@@ -20,6 +20,7 @@ from app.schemas.payment import CheckoutRequest, CheckoutResponse, OrderItemRead
 from app.services.access import is_super_or_admin
 from app.services.payment_service import (
     PaymentsDisabledError,
+    TenantPaymentsDisabledError,
     create_preference,
     get_payment,
     payments_configured,
@@ -93,6 +94,10 @@ async def checkout(
         init_point, external_id = await create_preference(
             db, order, base, settings.api_v1_prefix
         )
+    except TenantPaymentsDisabledError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
     except PaymentsDisabledError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)

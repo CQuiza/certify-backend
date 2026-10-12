@@ -48,7 +48,7 @@ async def test_register_student_and_login(client):
 
 
 @pytest.mark.asyncio
-async def test_checkout_requires_payments_enabled(client, superuser_token):
+async def test_checkout_requires_payments_enabled(client, superuser_token, student_token):
     course_id = await _create_for_sale_course(client, superuser_token)
     # Sin PAYMENTS_ENABLED/credenciales el checkout da 503.
     from app.api.v1.endpoints.payments import payments_configured
@@ -56,25 +56,7 @@ async def test_checkout_requires_payments_enabled(client, superuser_token):
     if payments_configured():
         pytest.skip("pagos ya configurados en el entorno de prueba")
 
-    # registramos un estudiante
-    await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": "comprador@example.com",
-            "password": "StrongPass1!",
-            "name": "Comprador",
-            "first_last_name": "Uno",
-            "identity_type": "CC",
-            "identity_number": "999000222",
-            "phone_number": "+570000000088",
-        },
-    )
-    login = await client.post(
-        "/api/v1/auth/token", data={"username": "comprador@example.com", "password": "StrongPass1!"}
-    )
-    token = login.json()["access_token"]
-
-    resp = await client.post("/api/v1/payments/checkout", headers=hdr(token), json={"course_ids": [course_id]})
+    resp = await client.post("/api/v1/payments/checkout", headers=hdr(student_token), json={"course_ids": [course_id]})
     assert resp.status_code == 503
 
 
@@ -185,9 +167,10 @@ async def test_checkout_and_approval_flow(client, superuser_token, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_preference_loads_items_from_db(client, superuser_token, db, monkeypatch):
-    """Regresión: create_preference debe cargar los ítems del pedido (evita MissingGreenlet)."""
+    """Regresión: create_preference carga ítems del pedido y aplica split (marketplace)."""
     from app.models.course import Course
     from app.models.payment import CourseOrder, CourseOrderItem
+    from app.models.platform_settings import PlatformSettings
     from app.services import payment_service as ps
 
     course = Course(title="Curso para Pref", status="published", price=40000, is_for_sale=True)
@@ -197,7 +180,16 @@ async def test_create_preference_loads_items_from_db(client, superuser_token, db
     db.add(order)
     await db.flush()
     db.add(CourseOrderItem(order_id=order.id, course_id=course.id, unit_price=40000, course_title=course.title))
+    db.add(
+        PlatformSettings(
+            tenant_id=order.tenant_id,
+            mercadopago_enabled=True,
+            mercadopago_marketplace_user_id="MP_USER_999",
+        )
+    )
     await db.flush()
+
+    captured: dict = {}
 
     class _FakeAsyncClient:
         def __init__(self, *args, **kwargs):
@@ -210,6 +202,7 @@ async def test_create_preference_loads_items_from_db(client, superuser_token, db
             return None
 
         async def post(self, url, json=None, headers=None):
+            captured.update(json or {})
             class R:
                 status_code = 200
                 text = "{}"
@@ -222,9 +215,36 @@ async def test_create_preference_loads_items_from_db(client, superuser_token, db
     monkeypatch.setattr(ps.httpx, "AsyncClient", _FakeAsyncClient)
     monkeypatch.setattr(ps, "payments_configured", lambda: True)
 
-    init_point, external_id = await ps.create_preference(db, order, "http://localhost", "/api/v1")
+    # Comisión global 10% -> application_fee = 4000.0
+    from app.core.settings import get_settings
+
+    settings = get_settings()
+    settings.platform_commission_percent = 10.0
+    try:
+        init_point, external_id = await ps.create_preference(db, order, "http://localhost", "/api/v1")
+    finally:
+        settings.platform_commission_percent = 0.0
+
     assert init_point == "https://init.mp/xyz"
     assert external_id == "PREF1"
+    assert captured.get("marketplace") == "MP_USER_999"
+    assert captured.get("application_fee") == 4000.0
+
+
+@pytest.mark.asyncio
+async def test_checkout_disabled_tenant_503(client, superuser_token, student_token, monkeypatch):
+    """Tenant sin pagos habilitados (o sin Marketplace User ID) -> 503."""
+    import app.api.v1.endpoints.payments as payments_mod
+
+    course_id = await _create_for_sale_course(client, superuser_token, "Curso Sin Pagos")
+    monkeypatch.setattr(payments_mod, "payments_configured", lambda: True)
+    import app.services.payment_service as ps_mod
+
+    monkeypatch.setattr(ps_mod, "payments_configured", lambda: True)
+
+    resp = await client.post("/api/v1/payments/checkout", headers=hdr(student_token), json={"course_ids": [course_id]})
+    assert resp.status_code == 503
+    assert "no está habilitado" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
