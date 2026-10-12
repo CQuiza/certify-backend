@@ -184,6 +184,50 @@ async def test_checkout_and_approval_flow(client, superuser_token, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_preference_loads_items_from_db(client, superuser_token, db, monkeypatch):
+    """Regresión: create_preference debe cargar los ítems del pedido (evita MissingGreenlet)."""
+    from app.models.course import Course
+    from app.models.payment import CourseOrder, CourseOrderItem
+    from app.services import payment_service as ps
+
+    course = Course(title="Curso para Pref", status="published", price=40000, is_for_sale=True)
+    db.add(course)
+    await db.flush()
+    order = CourseOrder(order_no="ORDPREF1", user_id=1, total=40000, currency="COP", status="pending")
+    db.add(order)
+    await db.flush()
+    db.add(CourseOrderItem(order_id=order.id, course_id=course.id, unit_price=40000, course_title=course.title))
+    await db.flush()
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            class R:
+                status_code = 200
+                text = "{}"
+
+                def json(self):
+                    return {"init_point": "https://init.mp/xyz", "id": "PREF1"}
+
+            return R()
+
+    monkeypatch.setattr(ps.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(ps, "payments_configured", lambda: True)
+
+    init_point, external_id = await ps.create_preference(db, order, "http://localhost", "/api/v1")
+    assert init_point == "https://init.mp/xyz"
+    assert external_id == "PREF1"
+
+
+@pytest.mark.asyncio
 async def test_webhook_invalid_signature_ignored(client, monkeypatch):
     # Con secreto configurado, una firma inválida se ignora.
     from app.core import settings as settings_mod

@@ -35,12 +35,22 @@ def payments_configured() -> bool:
 
 async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str, api_prefix: str) -> tuple[str, str]:
     """Crea la preferencia de Checkout Pro y devuelve (init_point, external_id)."""
+    from sqlalchemy import select
+
+    from app.models.payment import CourseOrderItem
+
     settings = get_settings()
     if not payments_configured():
         raise PaymentsDisabledError("Pagos no configurados")
 
+    rows = (
+        await db.execute(
+            select(CourseOrderItem).where(CourseOrderItem.order_id == order.id)
+        )
+    ).scalars().all()
+
     items = []
-    for item in order.items:
+    for item in rows:
         items.append(
             {
                 "title": item.course_title,
