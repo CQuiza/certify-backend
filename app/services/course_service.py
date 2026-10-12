@@ -20,8 +20,22 @@ class CourseService:
         skip: int = 0,
         limit: int = 100,
         search: str | None = None,
+        catalog: bool = False,
     ) -> Sequence[Course]:
-        """Anónimo: publicados. Estudiante: publicados en los que está inscrito. Staff: todos."""
+        """Anónimo: publicados. Estudiante: publicados en los que está inscrito. Staff: todos.
+
+        ``catalog=True``: siempre publicados (vista de catálogo), sin filtrar por
+        inscripción ni por rol.
+        """
+        if catalog:
+            return await course_repository.list(
+                db,
+                skip=skip,
+                limit=limit,
+                status=CourseStatus.published.value,
+                search=search,
+            )
+
         if actor is None:
             return await course_repository.list(
                 db,

@@ -24,9 +24,10 @@ async def list_courses(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=10000)] = 5000,
     search: Annotated[str | None, Query()] = None,
+    catalog: Annotated[bool, Query()] = False,
 ) -> list:
     rows = await course_service.list_for_actor(
-        db, actor=optional_user, skip=skip, limit=limit, search=search
+        db, actor=optional_user, skip=skip, limit=limit, search=search, catalog=catalog
     )
     if optional_user and is_super_or_admin(optional_user):
         return [CourseRead.model_validate(r).model_dump() for r in rows]
