@@ -59,11 +59,7 @@ async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str,
     tenant_settings = (
         await db.execute(select(PlatformSettings).where(PlatformSettings.tenant_id == order.tenant_id))
     ).scalar_one_or_none()
-    if (
-        tenant_settings is None
-        or not tenant_settings.mercadopago_enabled
-        or not tenant_settings.mercadopago_marketplace_user_id
-    ):
+    if tenant_settings is None or not tenant_settings.mercadopago_enabled:
         raise TenantPaymentsDisabledError(
             "El pago en línea no está habilitado para esta organización"
         )
@@ -85,8 +81,6 @@ async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str,
             }
         )
 
-    fee_amount = _platform_commission(float(order.total))
-
     back = settings.base_url.rstrip("/")
     payload = {
         "items": items,
@@ -99,10 +93,14 @@ async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str,
             "failure": f"{back}/payments/order/{order.id}?status=failure",
         },
         "statement_descriptor": "Certify",
-        # Split de pagos: la plataforma retiene su comisión; el resto va al tenant.
-        "marketplace": tenant_settings.mercadopago_marketplace_user_id,
-        "application_fee": fee_amount,
     }
+
+    # Modo split (SaaS): el tenant recibe la venta y la plataforma retiene su comisión.
+    # Modo directo (single / default): sin marketplace -> todo llega a la cuenta del .env.
+    marketplace_id = tenant_settings.mercadopago_marketplace_user_id
+    if marketplace_id:
+        payload["marketplace"] = marketplace_id
+        payload["application_fee"] = _platform_commission(float(order.total))
     headers = {
         "Authorization": f"Bearer {settings.mercadopago_access_token}",
         "Content-Type": "application/json",
@@ -128,6 +126,88 @@ async def get_payment(payment_id: str) -> dict:
         logger.error("MP get_payment falló — status=%s", resp.status_code)
         raise RuntimeError("Error consultando el pago en Mercado Pago")
     return resp.json()
+
+
+async def get_merchant_order(merchant_order_id: str) -> dict:
+    settings = get_settings()
+    headers = {"Authorization": f"Bearer {settings.mercadopago_access_token}"}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_MP_API}/v1/merchant_orders/{merchant_order_id}", headers=headers
+        )
+    if resp.status_code >= 300:
+        logger.error("MP get_merchant_order falló — status=%s", resp.status_code)
+        raise RuntimeError("Error consultando la orden de Mercado Pago")
+    return resp.json()
+
+
+async def resolve_payment_from_notification(
+    data_id: str, topic: str | None = None, action: str | None = None
+) -> dict | None:
+    """Resuelve el payment id real a partir de la notificación.
+
+    - Eventos `payment`/`payment.created` → data.id es el payment.
+    - Eventos de `merchant_order` → data.id es una merchant_order; se deriva el
+      primer payment de su lista.
+    """
+    is_merchant = bool(
+        (topic and "merchant_order" in topic.lower())
+        or (action and "merchant_order" in action.lower())
+    )
+    if is_merchant:
+        merchant_order = await get_merchant_order(data_id)
+        payments = merchant_order.get("payments") or []
+        real = next((p.get("id") for p in payments if p.get("id")), None)
+        if real:
+            return await get_payment(str(real))
+        return None
+
+    try:
+        return await get_payment(data_id)
+    except RuntimeError:
+        # Puede ser una merchant_order aunque el tema no lo indique.
+        try:
+            merchant_order = await get_merchant_order(data_id)
+        except RuntimeError:
+            return None
+        payments = merchant_order.get("payments") or []
+        real = next((p.get("id") for p in payments if p.get("id")), None)
+        if real:
+            return await get_payment(str(real))
+        return None
+
+
+async def search_payments_by_external_reference(external_reference: str) -> list[dict]:
+    settings = get_settings()
+    headers = {"Authorization": f"Bearer {settings.mercadopago_access_token}"}
+    params = {"external_reference": external_reference}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_MP_API}/v1/payments/search", params=params, headers=headers
+        )
+    if resp.status_code >= 300:
+        logger.error("MP payments/search falló — status=%s", resp.status_code)
+        raise RuntimeError("Error buscando el pago en Mercado Pago")
+    return resp.json().get("results") or []
+
+
+async def reconcile_order(db: AsyncSession, order: CourseOrder) -> CourseOrder:
+    """Si el pedido está pending, busca el pago por external_reference y procesa (directo sin webhook)."""
+    if order.status != "pending":
+        return order
+    if not payments_configured():
+        return order
+    try:
+        payments = await search_payments_by_external_reference(order.order_no)
+    except RuntimeError:
+        return order
+    for payment in payments:
+        if str(payment.get("status") or "").lower() == "approved":
+            processed = await process_payment(db, payment)
+            if processed is not None:
+                order = processed
+            break
+    return order
 
 
 def verify_webhook_signature(request) -> bool:

@@ -25,7 +25,8 @@ from app.services.payment_service import (
     get_payment,
     payments_configured,
     process_payment,
-    verify_webhook_signature,
+    reconcile_order,
+    resolve_payment_from_notification,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,17 @@ async def get_order(
     items = (
         await db.execute(select(CourseOrderItem).where(CourseOrderItem.order_id == order.id))
     ).scalars().all()
+
+    # Reconciliación: si el pedido está pending, el polling consulta a Mercado Pago
+    # por external_reference (sin depender del webhook) y procesa la aprobación.
+    if order.status == "pending" and payments_configured():
+        try:
+            await reconcile_order(db, order)
+            await db.commit()
+            await db.refresh(order)
+        except Exception:
+            logger.exception("Reconciliación fallida — order=%s", order.id)
+
     return OrderRead(
         id=order.id,
         order_no=order.order_no,
@@ -145,7 +157,13 @@ async def payment_webhook(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Notificación de Mercado Pago. Pública; se verifica la firma y el estado real."""
+    """Notificación de Mercado Pago.
+
+    La firma (x-signature) es consultiva: en modo prueba MP no la firma de forma
+    fiable. La validación real es server-to-server: se consulta el estado del pago
+    con el token de la plataforma y solo se procesa si su external_reference
+    coincide con un pedido existente.
+    """
     try:
         raw = await request.body()
         import json
@@ -155,29 +173,37 @@ async def payment_webhook(
         except json.JSONDecodeError:
             form = await request.form()
             data = dict(form)
-        payment_id = None
+
+        resource_id = None
+        action = None
+        topic = request.query_params.get("topic") or (data.get("topic") if isinstance(data, dict) else None)
         if isinstance(data, dict):
+            action = data.get("action")
             inner = data.get("data")
             if isinstance(inner, dict):
-                payment_id = inner.get("id")
-            if payment_id is None:
-                payment_id = data.get("data.id") or data.get("id")
+                resource_id = inner.get("id")
+            if resource_id is None:
+                resource_id = data.get("data.id") or data.get("id")
     except Exception:
         logger.exception("Webhook: error parseando notificación")
         return {"status": "ignored"}
 
-    if not payment_id:
-        return {"status": "ignored"}
-
-    if not verify_webhook_signature(request):
-        logger.warning("Webhook: firma inválida para payment=%s", payment_id)
+    if not resource_id:
         return {"status": "ignored"}
 
     try:
-        payment = await get_payment(str(payment_id))
+        payment = await resolve_payment_from_notification(str(resource_id), topic=topic, action=action)
+    except Exception:
+        logger.exception("Webhook: no se pudo resolver el payment — id=%s", resource_id)
+        return {"status": "ignored"}
+
+    if payment is None:
+        return {"status": "ignored"}
+
+    try:
         await process_payment(db, payment)
         await db.commit()
     except Exception:
-        logger.exception("Webhook: error procesando payment=%s", payment_id)
+        logger.exception("Webhook: error procesando payment=%s", payment.get("id"))
         return {"status": "error"}
     return {"status": "ok"}
