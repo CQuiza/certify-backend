@@ -332,3 +332,94 @@ async def test_payments_config_endpoints(client, superuser_token, student_token)
     assert put.status_code == 200
     assert put.json()["mercadopago_enabled"] is True
     assert put.json()["mercadopago_marketplace_user_id"] == "MP_USER_1"
+
+
+@pytest.mark.asyncio
+async def test_process_payment_finds_order_across_tenants(db, tenant_b_credentials):
+    """Regresión: el webhook (contexto default) debe encontrar y procesar un pedido de otro tenant."""
+    from app.core.tenant import tenant_ctx
+    from app.models.user import User
+    from app.repositories.tenant_repository import tenant_repository
+
+    acme = await tenant_repository.get_by_slug(db, "acme")
+    assert acme is not None
+
+    async with tenant_ctx(acme.id):
+        admin = (
+            await db.execute(select(User).where(User.email == "admin@acme.example"))
+        ).scalar_one()
+        order = CourseOrder(order_no="ORDXTEN1", user_id=admin.id, total=1000, currency="COP", status="pending")
+        db.add(order)
+        await db.flush()
+        order_id = order.id
+
+    # Contexto = default (como llega el webhook por el host raíz).
+    payment = {
+        "id": "PAYXT",
+        "status": "approved",
+        "external_reference": "ORDXTEN1",
+        "date_approved": "2026-10-13T12:00:00-04:00",
+    }
+    result = await ps.process_payment(db, payment)
+    assert result is not None
+    assert result.status == "approved"
+
+    async with tenant_ctx(acme.id):
+        row = await db.get(CourseOrder, order_id)
+        if row is not None:
+            await db.delete(row)
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_create_preference_back_urls_use_tenant_origin(db, monkeypatch):
+    from app.models.course import Course
+    from app.models.payment import CourseOrder, CourseOrderItem
+    from app.models.platform_settings import PlatformSettings
+
+    course = Course(title="Curso BackUrls", status="published", price=10000, is_for_sale=True)
+    db.add(course)
+    await db.flush()
+    order = CourseOrder(order_no="ORDERBU", user_id=1, total=10000, currency="COP", status="pending")
+    db.add(order)
+    await db.flush()
+    db.add(CourseOrderItem(order_id=order.id, course_id=course.id, unit_price=10000, course_title=course.title))
+    db.add(PlatformSettings(tenant_id=order.tenant_id, mercadopago_enabled=True, mercadopago_marketplace_user_id=None))
+    await db.flush()
+
+    captured: dict = {}
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured.update(json or {})
+            class R:
+                status_code = 200
+                text = "{}"
+
+                def json(self):
+                    return {"init_point": "https://init.mp/z", "id": "PREF3"}
+
+            return R()
+
+    monkeypatch.setattr(ps.httpx, "AsyncClient", _FakeClient)
+    monkeypatch.setattr(ps, "payments_configured", lambda: True)
+
+    import app.services.tenant_service as ts_mod
+
+    async def fake_origin(db_, tenant_id):
+        return "https://acme.testserver"
+
+    monkeypatch.setattr(ts_mod.tenant_service, "origin_for_tenant_id", fake_origin)
+
+    await ps.create_preference(db, order, "https://root.testserver", "/api/v1")
+    assert captured["back_urls"]["success"].startswith("https://acme.testserver/payments/order/")
+    assert captured["notification_url"].endswith("/api/v1/payments/webhook")

@@ -16,7 +16,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import get_settings
-from app.core.tenant import tenant_ctx
+from app.core.tenant import tenant_ctx, unscoped_ctx
 from app.models.payment import CourseOrder
 
 logger = logging.getLogger(__name__)
@@ -82,15 +82,25 @@ async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str,
         )
 
     back = settings.base_url.rstrip("/")
+    # Las back_urls deben volver al host del tenant (SPA con su sesión/tenant),
+    # no al host raíz. La notification_url sí puede ser global (agnóstica).
+    try:
+        from app.services.tenant_service import tenant_service
+
+        origin = (await tenant_service.origin_for_tenant_id(db, order.tenant_id)).rstrip("/")
+    except Exception:
+        logger.exception("No se pudo resolver el origen del tenant; usando BASE_URL")
+        origin = back
+
     payload = {
         "items": items,
         "external_reference": order.order_no,
         "auto_return": "approved",
         "notification_url": f"{back}{api_prefix}/payments/webhook",
         "back_urls": {
-            "success": f"{back}/payments/order/{order.id}?status=success",
-            "pending": f"{back}/payments/order/{order.id}?status=pending",
-            "failure": f"{back}/payments/order/{order.id}?status=failure",
+            "success": f"{origin}/payments/order/{order.id}?status=success",
+            "pending": f"{origin}/payments/order/{order.id}?status=pending",
+            "failure": f"{origin}/payments/order/{order.id}?status=failure",
         },
         "statement_descriptor": "Certify",
     }
@@ -252,10 +262,14 @@ async def process_payment(db: AsyncSession, payment: dict) -> CourseOrder | None
     from app.repositories.enrollment_repository import course_enrollment_repository
     from app.repositories.pending_certificate_repository import pending_certificate_repository
 
-    result = await db.execute(
-        select(CourseOrder).where(CourseOrder.order_no == external_reference)
-    )
-    order = result.scalar_one_or_none()
+    # El webhook es público (llega por el host de la plataforma), así que el
+    # pedido se busca SIN scope de tenant (order_no es único global); luego se
+    # procesa dentro del tenant del propio pedido.
+    async with unscoped_ctx():
+        result = await db.execute(
+            select(CourseOrder).where(CourseOrder.order_no == external_reference)
+        )
+        order = result.scalar_one_or_none()
     if order is None:
         logger.warning("Webhook: pedido %s no encontrado", external_reference)
         return None
