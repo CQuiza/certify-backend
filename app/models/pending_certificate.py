@@ -61,6 +61,11 @@ class PendingCertificate(TenantScoped, Base):
     issued_certificate_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("certificates.id", ondelete="SET NULL"), nullable=True
     )
+    # Si está seteado, al completar el curso se RENUEVA ese certificado (misma UUID)
+    # en lugar de emitir uno nuevo.
+    renewal_of_certificate_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("certificates.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -74,4 +79,7 @@ class PendingCertificate(TenantScoped, Base):
     creator: Mapped[User | None] = relationship("User", foreign_keys=[created_by])
     issued_certificate: Mapped[Certificate | None] = relationship(
         "Certificate", foreign_keys=[issued_certificate_id]
+    )
+    renewal_of_certificate: Mapped[Certificate | None] = relationship(
+        "Certificate", foreign_keys=[renewal_of_certificate_id]
     )

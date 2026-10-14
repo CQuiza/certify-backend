@@ -14,6 +14,8 @@ from app.models.enums import CertificateAuditAction, CertificateStatus, UserRole
 from app.models.user import User
 from app.repositories.certificate_repository import certificate_repository
 from app.repositories.certificate_type_repository import certificate_type_repository
+from app.repositories.enrollment_repository import course_enrollment_repository
+from app.repositories.pending_certificate_repository import pending_certificate_repository
 from app.repositories.user_repository import user_repository
 from app.services.certificate_notification import CertificateNotificationService
 from app.services.certificate_pdf import CertificatePdfService
@@ -23,6 +25,64 @@ from app.services.tenant_service import tenant_service
 from app.utils.helpers import student_display_name
 
 logger = logging.getLogger(__name__)
+
+
+async def reset_course_progress(db: AsyncSession, *, user_id: int, course_id: int) -> None:
+    """Borra el progreso de un estudiante en un curso (para reiniciarlo).
+
+    Elimina progreso de lecciones, intentos/respuestas de evaluación y entregas
+    de tareas, de modo que el curso vuelva a estar en 0% y deba superarse de nuevo.
+    """
+    from sqlalchemy import delete, select
+
+    from app.models.lesson import Lesson
+    from app.models.lesson_task import LessonTask
+    from app.models.module import Module
+    from app.models.module_assessment import ModuleAssessment
+    from app.models.progress import UserProgress
+    from app.models.task_submission import TaskSubmission
+    from app.models.user_assessment_attempt import (
+        UserAssessmentAnswer,
+        UserAssessmentAttempt,
+    )
+
+    lesson_ids = (
+        select(Lesson.id)
+        .join(Module, Lesson.module_id == Module.id)
+        .where(Module.course_id == course_id)
+    )
+    task_ids = select(LessonTask.id).where(LessonTask.lesson_id.in_(lesson_ids))
+    assessment_ids = (
+        select(ModuleAssessment.id)
+        .join(Module, ModuleAssessment.module_id == Module.id)
+        .where(Module.course_id == course_id)
+    )
+    attempt_ids = select(UserAssessmentAttempt.id).where(
+        UserAssessmentAttempt.user_id == user_id,
+        UserAssessmentAttempt.assessment_id.in_(assessment_ids),
+    )
+
+    await db.execute(
+        delete(UserAssessmentAnswer).where(UserAssessmentAnswer.attempt_id.in_(attempt_ids))
+    )
+    await db.execute(
+        delete(UserAssessmentAttempt).where(
+            UserAssessmentAttempt.user_id == user_id,
+            UserAssessmentAttempt.assessment_id.in_(assessment_ids),
+        )
+    )
+    await db.execute(
+        delete(TaskSubmission).where(
+            TaskSubmission.user_id == user_id,
+            TaskSubmission.task_id.in_(task_ids),
+        )
+    )
+    await db.execute(
+        delete(UserProgress).where(
+            UserProgress.user_id == user_id,
+            UserProgress.lesson_id.in_(lesson_ids),
+        )
+    )
 
 
 class CertificateLifecycleService:
@@ -48,6 +108,7 @@ class CertificateLifecycleService:
         issued_at: datetime | None = None,
         validity_extension: int | None = None,
         hours: int | None = None,
+        course_id: int | None = None,
         background_tasks=None,
     ):
         """Crea certificado, genera PDF, sube a MinIO, audita y notifica."""
@@ -92,6 +153,7 @@ class CertificateLifecycleService:
             db,
             certificate_type_id=certificate_type_id,
             user_id=user_id,
+            course_id=course_id,
             issued_at=issued_at,
             expires_at=expires_at,
             status=CertificateStatus.active.value,
@@ -349,6 +411,119 @@ class CertificateLifecycleService:
                 return False
         return True
 
+    async def start_renewal(
+        self,
+        db: AsyncSession,
+        *,
+        admin: User,
+        cert: Certificate,
+        issued_at: datetime | None = None,
+        validity_extension: int | None = None,
+        hours: int | None = None,
+        background_tasks=None,
+    ):
+        """Inicia el proceso de renovación de un certificado vencido.
+
+        Reasigna el curso al estudiante, reinicia su progreso y deja una
+        solicitud en proceso marcada como renovación (se renovará al 100%, o el
+        admin puede forzarla anticipadamente). No renueva aún.
+        """
+        if cert.course_id is None:
+            raise ValueError("El certificado no tiene un curso asociado para renovar")
+        if cert.user_id is None:
+            raise ValueError("El certificado no tiene estudiante asociado")
+
+        existing = await course_enrollment_repository.get_by_user_course(
+            db, cert.user_id, cert.course_id
+        )
+        if existing is None:
+            await course_enrollment_repository.create(
+                db, user_id=cert.user_id, course_id=cert.course_id
+            )
+        await reset_course_progress(db, user_id=cert.user_id, course_id=cert.course_id)
+
+        pc = await pending_certificate_repository.get_by_user_and_course(
+            db, cert.user_id, cert.course_id
+        )
+        if pc is None:
+            pc = await pending_certificate_repository.create(
+                db,
+                user_id=cert.user_id,
+                course_id=cert.course_id,
+                certificate_type_id=cert.certificate_type_id,
+                created_by=admin.id,
+                issued_at_override=issued_at,
+                validity_extension=validity_extension,
+                hours=hours,
+            )
+        await pending_certificate_repository.update(
+            db,
+            pc,
+            {
+                "status": "in_progress",
+                "renewal_of_certificate_id": cert.id,
+                "certificate_type_id": cert.certificate_type_id,
+                "created_by": admin.id,
+                "issued_at_override": issued_at,
+                "validity_extension": validity_extension,
+                "hours": hours,
+                "issued_certificate_id": None,
+                "issued_at": None,
+            },
+        )
+        db.add(
+            CertificateAudit(
+                certificate_id=cert.id,
+                certificate_unique_id=cert.unique_id,
+                action="renewal_started",
+                performed_by=admin.id,
+            )
+        )
+        await db.flush()
+        logger.info("Renovación iniciada — uid=%s, user=%s, course=%s",
+                    str(cert.unique_id), cert.user_id, cert.course_id)
+        return pc
+
+    async def materialize_pending(
+        self, db: AsyncSession, *, admin: User, pc, background_tasks=None
+    ):
+        """Emite (o renueva, si es renovación) la solicitud en proceso."""
+        if pc.renewal_of_certificate_id:
+            cert = await certificate_repository.get_by_id(db, pc.renewal_of_certificate_id)
+            if cert is None:
+                raise ValueError("El certificado a renovar no existe")
+            result = await self.renew_certificate(
+                db,
+                admin=admin,
+                cert=cert,
+                issued_at=pc.issued_at_override,
+                validity_extension=pc.validity_extension,
+                hours=pc.hours,
+                background_tasks=background_tasks,
+            )
+        else:
+            result = await self.issue_certificate(
+                db,
+                admin=admin,
+                user_id=pc.user_id,
+                certificate_type_id=pc.certificate_type_id,
+                issued_at=pc.issued_at_override,
+                validity_extension=pc.validity_extension,
+                hours=pc.hours,
+                course_id=pc.course_id,
+                background_tasks=background_tasks,
+            )
+        await pending_certificate_repository.update(
+            db,
+            pc,
+            {
+                "status": "issued",
+                "issued_certificate_id": result.id,
+                "issued_at": datetime.now(UTC),
+            },
+        )
+        return result
+
     async def maybe_issue_pending(
         self,
         db: AsyncSession,
@@ -357,45 +532,26 @@ class CertificateLifecycleService:
         course_id: int,
         background_tasks=None,
     ) -> int:
-        """Si el estudiante completó el curso, emite automáticamente las solicitudes
-        en proceso de ese curso. Devuelve cuántos certificados se emitieron."""
-        from app.repositories.pending_certificate_repository import (
-            pending_certificate_repository,
-        )
-
+        """Si el estudiante completó el curso, materializa las solicitudes en
+        proceso de ese curso (emisión nueva o renovación). Devuelve cuántas."""
         pc = await pending_certificate_repository.get_by_user_and_course(db, user_id, course_id)
         if not pc or pc.status != "in_progress":
             return 0
         if not await self.is_course_completed(db, user_id, course_id):
             return 0
 
-        course = await self._get_course(db, course_id)
-        ct_id = pc.certificate_type_id or (course.certificate_type_id if course else None)
-        if not ct_id:
-            logger.warning("Pending cert sin tipo — user=%s, course=%s", user_id, course_id)
-            return 0
+        if not pc.renewal_of_certificate_id:
+            course = await self._get_course(db, course_id)
+            ct_id = pc.certificate_type_id or (course.certificate_type_id if course else None)
+            if not ct_id:
+                logger.warning("Pending cert sin tipo — user=%s, course=%s", user_id, course_id)
+                return 0
 
         admin = await self._get_system_bot_or_admin(db, pc.created_by)
-        cert = await self.issue_certificate(
-            db,
-            admin=admin,
-            user_id=user_id,
-            certificate_type_id=ct_id,
-            issued_at=pc.issued_at_override,
-            validity_extension=pc.validity_extension,
-            hours=pc.hours,
-            background_tasks=background_tasks,
+        cert = await self.materialize_pending(
+            db, admin=admin, pc=pc, background_tasks=background_tasks
         )
-        await pending_certificate_repository.update(
-            db,
-            pc,
-            {
-                "status": "issued",
-                "issued_certificate_id": cert.id,
-                "issued_at": datetime.now(UTC),
-            },
-        )
-        logger.info("Certificado emitido automáticamente — user=%s, course=%s, cert=%s",
+        logger.info("Solicitud materializada automáticamente — user=%s, course=%s, cert=%s",
                     user_id, course_id, cert.id)
         return 1
 

@@ -47,6 +47,12 @@ class Certificate(TenantScoped, Base):
         Integer,
         ForeignKey("certificate_types.id"),
     )
+    course_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("courses.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE")
     )

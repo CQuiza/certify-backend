@@ -11,8 +11,10 @@ class CheckoutRequest(BaseModel):
 
 
 class CheckoutResponse(BaseModel):
-    order_id: int
-    init_point: str
+    order_id: int | None = None
+    init_point: str | None = None
+    free: bool = False
+    detail: str | None = None
 
 
 class OrderItemRead(BaseModel):

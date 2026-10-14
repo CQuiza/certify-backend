@@ -97,6 +97,7 @@ class CertificateRepository:
         *,
         certificate_type_id: int | None,
         user_id: int | None,
+        course_id: int | None = None,
         issued_at: object | None = None,
         expires_at: object | None = None,
         status: str,
@@ -106,6 +107,7 @@ class CertificateRepository:
         data: dict[str, object] = dict(
             certificate_type_id=certificate_type_id,
             user_id=user_id,
+            course_id=course_id,
             status=status,
             qr_code_url=qr_code_url,
             pdf_url=pdf_url,

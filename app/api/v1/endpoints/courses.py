@@ -64,6 +64,7 @@ async def create_course(
             teacher_id=current.id,
             status=body.status.value,
             price=body.price,
+            renewal_price=body.renewal_price,
             is_for_sale=body.is_for_sale,
         )
     if not is_super_or_admin(current):
@@ -76,6 +77,7 @@ async def create_course(
         teacher_id=body.teacher_id,
         status=body.status.value,
         price=body.price,
+        renewal_price=body.renewal_price,
         is_for_sale=body.is_for_sale,
     )
 

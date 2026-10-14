@@ -251,6 +251,13 @@ async def test_logo_endpoints_mocked(client, superuser_token, monkeypatch):
 
     from PIL import Image
 
+    # Simulamos MinIO configurado (los tests limpian las claves).
+    from app.core.settings import get_settings
+
+    _s = get_settings()
+    monkeypatch.setattr(_s, "minio_access_key", "test")
+    monkeypatch.setattr(_s, "minio_secret_key", "test")
+
     saved: dict = {}
     png_bytes = BytesIO()
     Image.new("RGB", (8, 8), color=(120, 60, 200)).save(png_bytes, format="PNG")

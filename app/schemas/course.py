@@ -15,6 +15,7 @@ class CourseCreate(BaseModel):
     teacher_id: int | None = None
     status: CourseStatus = CourseStatus.draft
     price: Decimal = Decimal("0")
+    renewal_price: Decimal | None = None
     is_for_sale: bool = False
 
 
@@ -25,6 +26,7 @@ class CourseUpdate(BaseModel):
     teacher_id: int | None = None
     status: CourseStatus | None = None
     price: Decimal | None = None
+    renewal_price: Decimal | None = None
     is_for_sale: bool | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -40,6 +42,7 @@ class CourseRead(BaseModel):
     updated_at: datetime
     status: CourseStatus
     price: Decimal | None = None
+    renewal_price: Decimal | None = None
     is_for_sale: bool = False
 
     model_config = ConfigDict(from_attributes=True)
@@ -53,6 +56,7 @@ class CoursePublicRead(BaseModel):
     description: str | None
     status: CourseStatus
     price: Decimal | None = None
+    renewal_price: Decimal | None = None
     is_for_sale: bool = False
 
     model_config = ConfigDict(from_attributes=True)

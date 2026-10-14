@@ -1,6 +1,7 @@
 """Certificado emitido."""
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,6 +61,7 @@ class CertificateRead(BaseModel):
     id: int
     unique_id: UUID
     certificate_type_id: int | None
+    course_id: int | None = None
     user_id: int | None
     issued_at: datetime
     expires_at: datetime | None
@@ -68,6 +70,10 @@ class CertificateRead(BaseModel):
     pdf_url: str | None
     created_at: datetime
     updated_at: datetime
+    # Renovación (se completa solo para la vista del estudiante)
+    can_renew: bool = False
+    renewal_price: Decimal | None = None
+    renewal_course_title: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

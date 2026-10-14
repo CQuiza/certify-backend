@@ -21,6 +21,7 @@ from app.models.certificate_audit import CertificateAudit
 from app.models.email_audit import EmailAudit
 from app.models.enums import CertificateStatus, CertificateAuditAction, EmailStatus, WorkerStatus
 from app.repositories.user_repository import user_repository
+from app.repositories.enrollment_repository import course_enrollment_repository
 from app.services.certificate_storage import CertificateStorageService
 from app.utils.certificate_editor import apply_revoked_watermark_pdf
 from app.utils.minio_client import get_minio_client
@@ -122,15 +123,23 @@ async def _async_check_expired_certificates():
                 )
                 system_bot_id = system_user.id if system_user else None
 
+                # Marca de agua en el PDF: best-effort (no impide expirar/desasignar).
                 try:
                     raw_pdf = await storage.download_pdf(uid_str)
                     watermarked_pdf = apply_revoked_watermark_pdf(raw_pdf, watermark_text="EXPIRADO")
                     await storage.upload_pdf(uid_str, watermarked_pdf)
                 except Exception as e:
-                    errors.append(f"Certificado {cert.id}: {e}")
-                    continue
+                    errors.append(f"Certificado {cert.id} (marca de agua): {e}")
 
                 cert.status = CertificateStatus.expired.value
+
+                # Desasignar el curso (ya no aparece en el panel del estudiante).
+                if cert.course_id and cert.user_id:
+                    enr = await course_enrollment_repository.get_by_user_course(
+                        session, cert.user_id, cert.course_id
+                    )
+                    if enr is not None:
+                        await course_enrollment_repository.delete(session, enr)
 
                 audit = CertificateAudit(
                     certificate_id=cert.id,

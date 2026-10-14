@@ -17,6 +17,7 @@ from app.core.settings import get_settings
 from app.models.enums import CertificateStatus, UserRole
 from app.models.user import User
 from app.repositories.certificate_repository import certificate_repository
+from app.repositories.course_repository import course_repository
 from app.repositories.pending_certificate_repository import pending_certificate_repository
 from app.repositories.user_repository import user_repository
 from app.schemas.certificate import (
@@ -39,6 +40,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/certificates", tags=["certificates"])
 
 
+async def _enrich_student_certificates(db, rows) -> list:
+    """Agrega datos de renovación (curso, precio, si es renovable) a los certificados."""
+    course_ids = {c.course_id for c in rows if c.course_id}
+    courses: dict[int, object] = {}
+    if course_ids:
+        for course in await course_repository.list_by_ids(db, list(course_ids)):
+            courses[course.id] = course
+    items = []
+    for c in rows:
+        item = CertificateRead.model_validate(c)
+        course = courses.get(c.course_id) if c.course_id else None
+        if course is not None:
+            item.renewal_course_title = course.title
+            item.renewal_price = (
+                course.renewal_price if course.renewal_price is not None else course.price
+            )
+            item.can_renew = c.status == "expired"
+        items.append(item)
+    return items
+
+
 @router.get("", response_model=CertificateListResponse)
 async def list_certificates(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -51,7 +73,8 @@ async def list_certificates(
     if current.role == UserRole.student.value:
         total = await certificate_repository.count_by_user(db, current.id, search=search)
         rows = await certificate_repository.list_by_user(db, current.id, skip=skip, limit=limit, search=search)
-        return CertificateListResponse(items=list(rows), total=total)
+        items = await _enrich_student_certificates(db, rows)
+        return CertificateListResponse(items=items, total=total)
     uid = user_id
     if uid is None:
         if not is_super_or_admin(current):
@@ -274,27 +297,11 @@ async def force_issue_pending_certificate(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Solicitud no encontrada")
     if pc.status == "issued":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La solicitud ya fue emitida")
-    if pc.certificate_type_id is None:
+    if pc.certificate_type_id is None and not pc.renewal_of_certificate_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El curso no tiene tipo de certificado asociado")
     try:
-        cert = await certificate_lifecycle.issue_certificate(
-            db,
-            admin=current,
-            user_id=pc.user_id,
-            certificate_type_id=pc.certificate_type_id,
-            issued_at=pc.issued_at_override,
-            validity_extension=pc.validity_extension,
-            hours=pc.hours,
-            background_tasks=background_tasks,
-        )
-        await pending_certificate_repository.update(
-            db,
-            pc,
-            {
-                "status": "issued",
-                "issued_certificate_id": cert.id,
-                "issued_at": cert.issued_at,
-            },
+        cert = await certificate_lifecycle.materialize_pending(
+            db, admin=current, pc=pc, background_tasks=background_tasks
         )
         await db.commit()
         return cert
@@ -384,7 +391,7 @@ async def batch_issue_certificates(
     return CertificateBatchIssueResponse(issued=issued, errors=errors).model_dump()
 
 
-@router.post("/{certificate_id}/renew", response_model=CertificateRead)
+@router.post("/{certificate_id}/renew", response_model=PendingCertificateRead)
 async def renew_certificate(
     certificate_id: int,
     body: CertificateRenewRequest,
@@ -392,6 +399,9 @@ async def renew_certificate(
     current: Annotated[User, Depends(get_current_user)],
     background_tasks: BackgroundTasks,
 ) -> object:
+    """Inicia la renovación (admin): reasigna el curso, reinicia progreso y deja
+    una solicitud en proceso marcada como renovación (se renueva al 100% o se
+    puede forzar anticipadamente)."""
     if not is_super_or_admin(current):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores")
     cert = await certificate_repository.get_by_id(db, certificate_id)
@@ -400,7 +410,7 @@ async def renew_certificate(
             status_code=status.HTTP_404_NOT_FOUND, detail="Certificado no encontrado"
         )
     try:
-        result = await certificate_lifecycle.renew_certificate(
+        pc = await certificate_lifecycle.start_renewal(
             db,
             admin=current,
             cert=cert,
@@ -410,7 +420,7 @@ async def renew_certificate(
             background_tasks=background_tasks,
         )
         await db.commit()
-        return result
+        return pc
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ValueError as e:

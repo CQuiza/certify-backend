@@ -26,6 +26,9 @@ os.environ["SUPERUSER_FIRST_LAST_NAME"] = "Usuario"
 os.environ["SYSTEM_BOT_USER_EMAIL"] = "system@example.com"
 os.environ["DEFAULT_TENANT_SLUG"] = "default"
 os.environ["ROOT_DOMAIN"] = "testserver"
+# Sin MinIO en tests (evita intentos de red al generar/regenerar PDFs).
+os.environ["MINIO_ACCESS_KEY"] = ""
+os.environ["MINIO_SECRET_KEY"] = ""
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

@@ -293,31 +293,77 @@ async def process_payment(db: AsyncSession, payment: dict) -> CourseOrder | None
                 )
             ).scalars().all()
 
-            for item in items:
-                course = (
-                    await db.execute(select(Course).where(Course.id == item.course_id))
-                ).scalar_one_or_none()
-                if course is None:
-                    continue
-                existing = await course_enrollment_repository.get_by_user_course(
-                    db, order.user_id, course.id
-                )
-                if existing is None:
-                    await course_enrollment_repository.create(
-                        db, user_id=order.user_id, course_id=course.id
+            if order.kind == "renewal" and order.renewal_certificate_id:
+                from app.models.certificate import Certificate
+                from app.services.certificate_lifecycle import reset_course_progress
+
+                cert = (
+                    await db.execute(
+                        select(Certificate).where(Certificate.id == order.renewal_certificate_id)
                     )
-                if course.certificate_type_id:
+                ).scalar_one_or_none()
+                for item in items:
+                    course = (
+                        await db.execute(select(Course).where(Course.id == item.course_id))
+                    ).scalar_one_or_none()
+                    if course is None:
+                        continue
+                    existing = await course_enrollment_repository.get_by_user_course(
+                        db, order.user_id, course.id
+                    )
+                    if existing is None:
+                        await course_enrollment_repository.create(
+                            db, user_id=order.user_id, course_id=course.id
+                        )
+                    # Reiniciar progreso: debe volver a superar el curso.
+                    await reset_course_progress(db, user_id=order.user_id, course_id=course.id)
+                    # Solicitud de renovación (al 100% renueva el mismo certificado).
                     pc = await pending_certificate_repository.get_by_user_and_course(
                         db, order.user_id, course.id
                     )
+                    renewal_fields = {
+                        "status": "in_progress",
+                        "renewal_of_certificate_id": cert.id if cert else None,
+                        "certificate_type_id": cert.certificate_type_id if cert else course.certificate_type_id,
+                        "created_by": order.user_id,
+                        "issued_certificate_id": None,
+                        "issued_at": None,
+                    }
                     if pc is None:
-                        await pending_certificate_repository.create(
+                        pc = await pending_certificate_repository.create(
                             db,
                             user_id=order.user_id,
                             course_id=course.id,
-                            certificate_type_id=course.certificate_type_id,
+                            certificate_type_id=cert.certificate_type_id if cert else course.certificate_type_id,
                             created_by=order.user_id,
                         )
+                    await pending_certificate_repository.update(db, pc, renewal_fields)
+            else:
+                for item in items:
+                    course = (
+                        await db.execute(select(Course).where(Course.id == item.course_id))
+                    ).scalar_one_or_none()
+                    if course is None:
+                        continue
+                    existing = await course_enrollment_repository.get_by_user_course(
+                        db, order.user_id, course.id
+                    )
+                    if existing is None:
+                        await course_enrollment_repository.create(
+                            db, user_id=order.user_id, course_id=course.id
+                        )
+                    if course.certificate_type_id:
+                        pc = await pending_certificate_repository.get_by_user_and_course(
+                            db, order.user_id, course.id
+                        )
+                        if pc is None:
+                            await pending_certificate_repository.create(
+                                db,
+                                user_id=order.user_id,
+                                course_id=course.id,
+                                certificate_type_id=course.certificate_type_id,
+                                created_by=order.user_id,
+                            )
 
             user = (
                 await db.execute(select(User).where(User.id == order.user_id))

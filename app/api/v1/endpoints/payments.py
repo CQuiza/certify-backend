@@ -3,19 +3,23 @@
 import logging
 import time
 import uuid
+from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
 from app.core.settings import get_settings
+from app.models.certificate import Certificate
 from app.models.course import Course
 from app.models.enums import CourseStatus
 from app.models.payment import CourseOrder, CourseOrderItem
 from app.models.user import User
+from app.repositories.certificate_repository import certificate_repository
+from app.repositories.course_repository import course_repository
 from app.schemas.payment import CheckoutRequest, CheckoutResponse, OrderItemRead, OrderRead
 from app.services.access import is_super_or_admin
 from app.services.payment_service import (
@@ -109,6 +113,85 @@ async def checkout(
     order.external_id = external_id
     await db.commit()
     logger.info("Checkout creado — order=%s user=%s total=%s", order.order_no, current.id, total)
+    return CheckoutResponse(order_id=order.id, init_point=init_point)
+
+
+@router.post("/renew/{certificate_id}", response_model=CheckoutResponse)
+async def renew_checkout(
+    certificate_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+    background_tasks: BackgroundTasks,
+):
+    """Solicita la renovación de un certificado vencido (autoservicio).
+
+    Reasigna el curso + reinicia el progreso y crea la solicitud de renovación.
+    Si el precio de renovación es 0 (explícito) se inicia gratis; si no, crea el
+    pago en Mercado Pago por el valor del curso.
+    """
+    if current.role != "student":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo estudiantes")
+    cert = await certificate_repository.get_by_id(db, certificate_id)
+    if not cert or cert.user_id != current.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificado no encontrado")
+    if cert.status != "expired":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo se pueden renovar certificados vencidos")
+    if cert.course_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El certificado no tiene curso asociado")
+
+    course = await course_repository.get_by_id(db, cert.course_id)
+    if course is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Curso no encontrado")
+
+    price = course.renewal_price if course.renewal_price is not None else course.price
+    price = price or Decimal("0")
+
+    if price == 0:
+        from app.services.certificate_lifecycle import certificate_lifecycle
+
+        await certificate_lifecycle.start_renewal(
+            db, admin=current, cert=cert, background_tasks=background_tasks
+        )
+        await db.commit()
+        logger.info("Renovación gratuita iniciada — cert=%s user=%s", cert.id, current.id)
+        return CheckoutResponse(
+            free=True,
+            detail="Renovación iniciada. Vuelve a completar el curso para reactivar el certificado.",
+        )
+
+    if not payments_configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="El pago en línea no está disponible")
+
+    settings = get_settings()
+    order = CourseOrder(
+        order_no=_new_order_no(),
+        user_id=current.id,
+        total=price,
+        currency=settings.payments_currency,
+        status="pending",
+        kind="renewal",
+        renewal_certificate_id=cert.id,
+    )
+    db.add(order)
+    await db.flush()
+    db.add(
+        CourseOrderItem(
+            order_id=order.id, course_id=course.id, unit_price=price, course_title=course.title
+        )
+    )
+    await db.flush()
+
+    base = settings.base_url.rstrip("/")
+    try:
+        init_point, external_id = await create_preference(db, order, base, settings.api_v1_prefix)
+    except (TenantPaymentsDisabledError, PaymentsDisabledError) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    order.external_id = external_id
+    await db.commit()
+    logger.info("Checkout renovación creado — order=%s cert=%s", order.order_no, cert.id)
     return CheckoutResponse(order_id=order.id, init_point=init_point)
 
 

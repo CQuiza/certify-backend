@@ -62,6 +62,7 @@ class Course(TenantScoped, Base):
         String(20), default="draft", server_default="draft"
     )
     price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=0)
+    renewal_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     is_for_sale: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )

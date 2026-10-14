@@ -41,6 +41,10 @@ class CourseOrder(TenantScoped, Base):
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     currency: Mapped[str] = mapped_column(String(10), nullable=False, default="COP")
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending")
+    kind: Mapped[str] = mapped_column(String(20), default="course", server_default="course")
+    renewal_certificate_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("certificates.id", ondelete="SET NULL"), nullable=True
+    )
     external_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
