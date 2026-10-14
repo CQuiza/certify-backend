@@ -191,18 +191,24 @@ class UserAssessmentRepository:
         sub_map = {s.task_id: s for s in submissions}
 
         submitted_count = len(submitted_task_ids)
-        tasks_detail = [
-            TaskProgressItem(
-                task_id=t.id,
-                task_title=t.title,
-                submitted=t.id in submitted_task_ids,
-                submission_id=sub_map[t.id].id if t.id in sub_map else None,
-                file_url=sub_map[t.id].file_url if t.id in sub_map else None,
-                original_filename=sub_map[t.id].original_filename if t.id in sub_map else None,
-                submitted_at=sub_map[t.id].submitted_at if t.id in sub_map else None,
+        tasks_detail = []
+        for t in tasks:
+            sub = sub_map.get(t.id)
+            tasks_detail.append(
+                TaskProgressItem(
+                    task_id=t.id,
+                    task_title=t.title,
+                    submitted=t.id in submitted_task_ids,
+                    submission_id=sub.id if sub else None,
+                    file_url=sub.file_url if sub else None,
+                    original_filename=sub.original_filename if sub else None,
+                    submitted_at=sub.submitted_at if sub else None,
+                    score=float(sub.score) if sub and sub.score is not None else None,
+                    feedback=sub.feedback if sub else None,
+                    passed=sub.passed if sub else False,
+                    graded_at=sub.graded_at if sub else None,
+                )
             )
-            for t in tasks
-        ]
         return len(tasks), submitted_count, tasks_detail
 
     async def has_passed(

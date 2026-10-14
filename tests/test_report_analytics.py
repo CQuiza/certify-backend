@@ -146,8 +146,11 @@ async def test_task_grade_flow(client, teacher_token, superuser_token):
 
     report = await client.get("/api/v1/reports/task_grades", headers=hdr(superuser_token))
     assert report.status_code == 200, report.text
-    rows = report.json()["rows"]
+    payload = report.json()
+    assert "modulo" in {c["key"] for c in payload["columns"]}
+    rows = payload["rows"]
     assert any(r["tarea"] == "Tarea 1" and float(r["nota"]) == 82.5 for r in rows)
+    assert any(r.get("modulo") == "Mod" for r in rows)
 
 
 @pytest.mark.asyncio

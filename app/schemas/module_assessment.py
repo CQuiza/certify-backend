@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TaskProgressItem(BaseModel):
@@ -15,6 +15,10 @@ class TaskProgressItem(BaseModel):
     file_url: str | None = None
     original_filename: str | None = None
     submitted_at: datetime | None = None
+    score: float | None = None
+    feedback: str | None = None
+    passed: bool = False
+    graded_at: datetime | None = None
 
 
 class AssessmentOptionCreate(BaseModel):
@@ -39,6 +43,21 @@ class AssessmentQuestionCreate(BaseModel):
     order_index: int = 0
     options: list[AssessmentOptionCreate]
 
+    @model_validator(mode="after")
+    def _validate_correct_option(self) -> "AssessmentQuestionCreate":
+        correct = sum(1 for o in self.options if o.is_correct)
+        if self.question_type == "multiple_choice":
+            if len(self.options) < 2:
+                raise ValueError("Una pregunta de opción múltiple debe tener al menos 2 opciones")
+            if correct != 1:
+                raise ValueError("Debes marcar exactamente una respuesta correcta")
+        else:
+            if len(self.options) != 2:
+                raise ValueError("Una pregunta de verdadero/falso debe tener 2 opciones")
+            if correct != 1:
+                raise ValueError("Debes marcar exactamente una respuesta correcta")
+        return self
+
 
 class AssessmentQuestionRead(BaseModel):
     id: int
@@ -55,7 +74,7 @@ class AssessmentQuestionReadWithCorrect(AssessmentQuestionRead):
 
 
 class ModuleAssessmentCreate(BaseModel):
-    passing_score: int = 70
+    passing_score: int = Field(default=70, ge=1, le=100)
     questions: list[AssessmentQuestionCreate]
 
 

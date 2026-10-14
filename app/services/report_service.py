@@ -458,6 +458,7 @@ async def _task_grades(db, start, end, limit) -> list[dict]:
             student.email,
             grader.name,
             grader.first_last_name,
+            Module.title,
         )
         .select_from(TaskSubmission)
         .join(LessonTask, TaskSubmission.task_id == LessonTask.id)
@@ -484,6 +485,7 @@ async def _task_grades(db, start, end, limit) -> list[dict]:
                 "identidad": r[10],
                 "correo": r[11],
                 "curso": r[7],
+                "modulo": r[14],
                 "leccion": r[6],
                 "tarea": r[5],
                 "nota": float(r[1]) if r[1] is not None else None,
@@ -649,6 +651,7 @@ REPORTS: dict[str, dict] = {
             {"key": "identidad", "label": "Documento"},
             {"key": "correo", "label": "Correo"},
             {"key": "curso", "label": "Curso"},
+            {"key": "modulo", "label": "Módulo"},
             {"key": "leccion", "label": "Lección"},
             {"key": "tarea", "label": "Tarea"},
             {"key": "nota", "label": "Nota"},

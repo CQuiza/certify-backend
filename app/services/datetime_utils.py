@@ -30,6 +30,28 @@ def number_to_spanish_years_text(years: int) -> str:
     return f"{word} ({years}) {plural}"
 
 
+def normalize_issue_date(issued_at: datetime | None) -> datetime:
+    """Normaliza la fecha de expedición de un certificado.
+
+    Si no se recibe fecha, se usa el instante actual. Si la fecha no tiene zona
+    horaria se asume UTC. Cuando la fecha llega a medianoche (valor que produce un
+    ``<input type="date">``) se fija a mediodía para que el día calendario no se
+    desplace al mostrarlo en zonas horarias negativas (p. ej. UTC-5).
+    """
+    if issued_at is None:
+        return datetime.now(UTC)
+    if issued_at.tzinfo is None:
+        issued_at = issued_at.replace(tzinfo=UTC)
+    if (
+        issued_at.hour == 0
+        and issued_at.minute == 0
+        and issued_at.second == 0
+        and issued_at.microsecond == 0
+    ):
+        issued_at = issued_at.replace(hour=12)
+    return issued_at
+
+
 def compute_certificate_expires_at(
     issued_at: datetime,
     validity_type: str,

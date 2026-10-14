@@ -20,7 +20,10 @@ from app.repositories.user_repository import user_repository
 from app.services.certificate_notification import CertificateNotificationService
 from app.services.certificate_pdf import CertificatePdfService
 from app.services.certificate_storage import CertificateStorageService
-from app.services.datetime_utils import compute_certificate_expires_at
+from app.services.datetime_utils import (
+    compute_certificate_expires_at,
+    normalize_issue_date,
+)
 from app.services.tenant_service import tenant_service
 from app.utils.helpers import student_display_name
 
@@ -126,11 +129,7 @@ class CertificateLifecycleService:
         if not student or student.role != UserRole.student.value:
             raise ValueError("El usuario destino debe ser estudiante")
 
-        if issued_at is not None:
-            if issued_at.tzinfo is None:
-                issued_at = issued_at.replace(tzinfo=UTC)
-        else:
-            issued_at = datetime.now(UTC)
+        issued_at = normalize_issue_date(issued_at)
 
         vt = ct.validity_type
         vv = ct.validity_value
@@ -303,11 +302,7 @@ class CertificateLifecycleService:
         if not ct:
             raise ValueError("Tipo de certificado no existe")
 
-        if issued_at is not None:
-            if issued_at.tzinfo is None:
-                issued_at = issued_at.replace(tzinfo=UTC)
-        else:
-            issued_at = datetime.now(UTC)
+        issued_at = normalize_issue_date(issued_at)
 
         vt = ct.validity_type
         vv = ct.validity_value
