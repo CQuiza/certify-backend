@@ -33,6 +33,7 @@ from app.schemas.platform_settings import (
     OrganizationUpdate,
     PaymentsSettingsRead,
     PaymentsSettingsUpdate,
+    PublicBrandingRead,
     TestEmailRequest,
 )
 from app.services.email_template_service import get_placeholders
@@ -84,6 +85,14 @@ async def get_branding(
     return await platform_settings_service.get_branding(db)
 
 
+@router.get("/public", response_model=PublicBrandingRead)
+async def get_public_branding(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Datos públicos de la organización (nombre y contactos) para páginas públicas."""
+    return await platform_settings_service.get_public_branding(db)
+
+
 @router.get("/branding/logo")
 async def get_branding_logo(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -116,6 +125,8 @@ async def update_organization(
         db,
         organization_name=body.organization_name,
         dashboard_message=body.dashboard_message,
+        contact_phone=body.contact_phone,
+        contact_email=str(body.contact_email) if body.contact_email else None,
         updated_by=current.id,
     )
 

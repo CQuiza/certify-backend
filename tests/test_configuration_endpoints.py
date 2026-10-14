@@ -26,7 +26,35 @@ async def test_branding_readable_by_any_authenticated(client, superuser_token):
     body = resp.json()
     assert "dashboard_message" in body
     assert "organization_name" in body
+    assert "contact_phone" in body
+    assert "contact_email" in body
 
+
+@pytest.mark.asyncio
+async def test_public_branding_no_auth_and_contacts(client, superuser_token):
+    # Sin autenticación debe responder.
+    resp = await client.get("/api/v1/configuration/public")
+    assert resp.status_code == 200
+    assert set(resp.json().keys()) >= {"organization_name", "contact_phone", "contact_email"}
+
+    # Guardar contactos (superuser) y verificar que se reflejan en público y branding.
+    put = await client.put(
+        "/api/v1/configuration/organization",
+        headers=_auth_headers(superuser_token),
+        json={
+            "organization_name": "Org Contacto",
+            "dashboard_message": None,
+            "contact_phone": "+57 300 111 2233",
+            "contact_email": "hola@org.example",
+        },
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["contact_phone"] == "+57 300 111 2233"
+    assert put.json()["contact_email"] == "hola@org.example"
+
+    pub = await client.get("/api/v1/configuration/public")
+    assert pub.json()["contact_phone"] == "+57 300 111 2233"
+    assert pub.json()["contact_email"] == "hola@org.example"
 
 @pytest.mark.asyncio
 async def test_student_cannot_update_organization(client, student_token):

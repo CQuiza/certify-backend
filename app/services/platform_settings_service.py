@@ -86,6 +86,17 @@ class PlatformSettingsService:
                 and settings.minio_access_key
                 and settings.minio_secret_key
             ),
+            "contact_phone": row.contact_phone,
+            "contact_email": row.contact_email,
+        }
+
+    async def get_public_branding(self, db: AsyncSession) -> dict:
+        """Datos públicos de la organización (sin auth): nombre y contactos."""
+        row = await self.get_or_create(db)
+        return {
+            "organization_name": row.organization_name,
+            "contact_phone": row.contact_phone,
+            "contact_email": row.contact_email,
         }
 
     async def save_organization(
@@ -94,6 +105,8 @@ class PlatformSettingsService:
         *,
         organization_name: str | None,
         dashboard_message: str | None,
+        contact_phone: str | None = None,
+        contact_email: str | None = None,
         updated_by: int | None = None,
     ) -> dict:
         row = await self.get_or_create(db)
@@ -103,6 +116,8 @@ class PlatformSettingsService:
             {
                 "organization_name": (organization_name or "").strip() or None,
                 "dashboard_message": (dashboard_message or "").strip() or None,
+                "contact_phone": (contact_phone or "").strip() or None,
+                "contact_email": (contact_email or "").strip() or None,
                 "updated_by": updated_by,
             },
         )

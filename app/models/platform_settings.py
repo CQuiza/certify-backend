@@ -48,6 +48,8 @@ class PlatformSettings(Base):
     organization_name: Mapped[str | None] = mapped_column(String(255))
     dashboard_message: Mapped[str | None] = mapped_column(Text)
     branding_logo_object_key: Mapped[str | None] = mapped_column(String(255))
+    contact_phone: Mapped[str | None] = mapped_column(String(30))
+    contact_email: Mapped[str | None] = mapped_column(String(255))
 
     # ── Correo saliente (SMTP) ────────────────────────────────
     smtp_enabled: Mapped[bool] = mapped_column(

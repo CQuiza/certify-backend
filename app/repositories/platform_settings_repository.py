@@ -32,6 +32,8 @@ class PlatformSettingsRepository:
             "organization_name",
             "dashboard_message",
             "branding_logo_object_key",
+            "contact_phone",
+            "contact_email",
             "smtp_enabled",
             "smtp_host",
             "smtp_port",
