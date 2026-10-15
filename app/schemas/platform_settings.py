@@ -13,6 +13,9 @@ class BrandingRead(BaseModel):
     organization_name: str | None
     dashboard_message: str
     has_custom_logo: bool
+    has_dark_logo: bool = False
+    logo_surface: str = "auto"
+    logo_is_dark: bool = False
     contact_phone: str | None = None
     contact_email: str | None = None
 
@@ -21,6 +24,7 @@ class PublicBrandingRead(BaseModel):
     """Datos públicos de la organización (sin autenticación)."""
 
     organization_name: str | None = None
+    has_custom_logo: bool = False
     contact_phone: str | None = None
     contact_email: str | None = None
 
@@ -32,6 +36,7 @@ class OrganizationUpdate(BaseModel):
     dashboard_message: str | None = Field(default=None, max_length=5000)
     contact_phone: str | None = Field(default=None, max_length=30)
     contact_email: EmailStr | None = None
+    logo_surface: str | None = Field(default=None, pattern="^(auto|none|light)$")
 
 
 class EmailSettingsRead(BaseModel):

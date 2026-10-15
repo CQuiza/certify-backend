@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from io import BytesIO
 
+from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import decrypt_secret, encrypt_secret, password_is_set
@@ -25,8 +27,29 @@ from app.services.email_template_service import EmailTemplateService
 logger = logging.getLogger(__name__)
 
 _OBJECT_NAME = "certify_logo.png"
+_DARK_OBJECT_NAME = "certify_logo_dark.png"
 
 _DEFAULT_SMTP_PORT = 587
+
+_LOGO_SURFACES = {"auto", "none", "light"}
+
+
+def _logo_is_dark(data: bytes) -> bool:
+    """True si la "tinta" del logo es predominantemente oscura (poco visible sobre navy)."""
+    try:
+        img = Image.open(BytesIO(data)).convert("RGBA")
+    except Exception:
+        return False
+    total = 0.0
+    count = 0
+    for r, g, b, a in img.getdata():
+        if a < 16:
+            continue
+        total += 0.299 * r + 0.587 * g + 0.114 * b
+        count += 1
+    if count == 0:
+        return False
+    return (total / count) < 128
 
 
 @dataclass(frozen=True)
@@ -78,23 +101,26 @@ class PlatformSettingsService:
         from app.services.email_template_service import render
 
         message = render(template, {"app_name": app_name, "organization": organization})
+        minio_ready = bool(settings.minio_access_key and settings.minio_secret_key)
         return {
             "organization_name": row.organization_name,
             "dashboard_message": message,
-            "has_custom_logo": bool(
-                row.branding_logo_object_key
-                and settings.minio_access_key
-                and settings.minio_secret_key
-            ),
+            "has_custom_logo": bool(row.branding_logo_object_key and minio_ready),
+            "has_dark_logo": bool(row.branding_logo_dark_object_key and minio_ready),
+            "logo_surface": row.branding_logo_surface or "auto",
+            "logo_is_dark": bool(row.branding_logo_is_dark),
             "contact_phone": row.contact_phone,
             "contact_email": row.contact_email,
         }
 
     async def get_public_branding(self, db: AsyncSession) -> dict:
-        """Datos públicos de la organización (sin auth): nombre y contactos."""
+        """Datos públicos de la organización (sin auth): nombre, contactos y si tiene logo."""
         row = await self.get_or_create(db)
+        settings = get_settings()
+        minio_ready = bool(settings.minio_access_key and settings.minio_secret_key)
         return {
             "organization_name": row.organization_name,
+            "has_custom_logo": bool(row.branding_logo_object_key and minio_ready),
             "contact_phone": row.contact_phone,
             "contact_email": row.contact_email,
         }
@@ -107,20 +133,20 @@ class PlatformSettingsService:
         dashboard_message: str | None,
         contact_phone: str | None = None,
         contact_email: str | None = None,
+        logo_surface: str | None = None,
         updated_by: int | None = None,
     ) -> dict:
         row = await self.get_or_create(db)
-        await platform_settings_repository.update(
-            db,
-            row,
-            {
-                "organization_name": (organization_name or "").strip() or None,
-                "dashboard_message": (dashboard_message or "").strip() or None,
-                "contact_phone": (contact_phone or "").strip() or None,
-                "contact_email": (contact_email or "").strip() or None,
-                "updated_by": updated_by,
-            },
-        )
+        fields: dict[str, object] = {
+            "organization_name": (organization_name or "").strip() or None,
+            "dashboard_message": (dashboard_message or "").strip() or None,
+            "contact_phone": (contact_phone or "").strip() or None,
+            "contact_email": (contact_email or "").strip() or None,
+            "updated_by": updated_by,
+        }
+        if logo_surface in _LOGO_SURFACES:
+            fields["branding_logo_surface"] = logo_surface
+        await platform_settings_repository.update(db, row, fields)
         logger.info("Configuración de organización actualizada — by=%s", updated_by)
         return await self.get_branding(db)
 
@@ -324,19 +350,26 @@ class PlatformSettingsService:
 
     # ── logo (MinIO) ──────────────────────────────────────────
 
-    def _logo_object_key(self, settings) -> str:
+    def _logo_object_key(self, settings, variant: str = "normal") -> str:
         prefix = settings.minio_path_branding.strip().strip("/")
-        return f"{prefix}/{_OBJECT_NAME}" if prefix else _OBJECT_NAME
+        name = _DARK_OBJECT_NAME if variant == "dark" else _OBJECT_NAME
+        return f"{prefix}/{name}" if prefix else name
 
-    async def get_logo_bytes(self, row: PlatformSettings | None = None) -> bytes | None:
+    async def get_logo_bytes(
+        self, row: PlatformSettings | None = None, variant: str = "normal"
+    ) -> bytes | None:
         from app.utils.minio_client import get_minio_client
 
         settings = get_settings()
         if not (settings.minio_access_key and settings.minio_secret_key):
             return None
-        if row is not None and not row.branding_logo_object_key:
+        key_field = (
+            "branding_logo_dark_object_key" if variant == "dark"
+            else "branding_logo_object_key"
+        )
+        if row is not None and not getattr(row, key_field):
             return None
-        key = self._logo_object_key(settings)
+        key = self._logo_object_key(settings, variant)
         try:
             def _load() -> bytes:
                 return get_minio_client(settings).download_bytes(key)
@@ -368,9 +401,44 @@ class PlatformSettingsService:
 
         row = await self.get_or_create(db)
         await platform_settings_repository.update(
-            db, row, {"branding_logo_object_key": key, "updated_by": updated_by}
+            db,
+            row,
+            {
+                "branding_logo_object_key": key,
+                "branding_logo_is_dark": _logo_is_dark(data),
+                "updated_by": updated_by,
+            },
         )
         logger.info("Logo de marca actualizado — by=%s", updated_by)
+
+    async def save_dark_logo(
+        self, db: AsyncSession, data: bytes, *, updated_by: int | None = None
+    ) -> None:
+        """Sube el logo para superficies oscuras (sidebar navy)."""
+        from app.utils.minio_client import get_minio_client
+
+        settings = get_settings()
+        if not (settings.minio_access_key and settings.minio_secret_key):
+            raise ValueError("MinIO no configurado")
+
+        key = self._logo_object_key(settings, "dark")
+
+        def _go() -> None:
+            client = get_minio_client(settings)
+            client.ensure_bucket()
+            client.upload_bytes(key, data, content_type="image/png")
+
+        try:
+            await asyncio.to_thread(_go)
+        except Exception as exc:
+            logger.exception("Error subiendo logo oscuro")
+            raise RuntimeError("No se pudo guardar el logo en MinIO") from exc
+
+        row = await self.get_or_create(db)
+        await platform_settings_repository.update(
+            db, row, {"branding_logo_dark_object_key": key, "updated_by": updated_by}
+        )
+        logger.info("Logo oscuro de marca actualizado — by=%s", updated_by)
 
     async def remove_logo(self, db: AsyncSession, *, updated_by: int | None = None) -> None:
         from app.utils.minio_client import get_minio_client
@@ -394,6 +462,30 @@ class PlatformSettingsService:
             {"branding_logo_object_key": None, "updated_by": updated_by},
         )
         logger.info("Logo de marca restaurado a default — by=%s", updated_by)
+
+    async def remove_dark_logo(self, db: AsyncSession, *, updated_by: int | None = None) -> None:
+        """Elimina el logo para superficies oscuras."""
+        from app.utils.minio_client import get_minio_client
+
+        settings = get_settings()
+        row = await self.get_or_create(db)
+        if settings.minio_access_key and settings.minio_secret_key:
+            key = self._logo_object_key(settings, "dark")
+
+            def _go() -> None:
+                get_minio_client(settings).remove_object(key)
+
+            try:
+                await asyncio.to_thread(_go)
+            except Exception:
+                logger.exception("Error eliminando logo oscuro")
+
+        await platform_settings_repository.update(
+            db,
+            row,
+            {"branding_logo_dark_object_key": None, "updated_by": updated_by},
+        )
+        logger.info("Logo oscuro eliminado — by=%s", updated_by)
 
 
 platform_settings_service = PlatformSettingsService()

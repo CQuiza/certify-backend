@@ -48,6 +48,13 @@ class PlatformSettings(Base):
     organization_name: Mapped[str | None] = mapped_column(String(255))
     dashboard_message: Mapped[str | None] = mapped_column(Text)
     branding_logo_object_key: Mapped[str | None] = mapped_column(String(255))
+    branding_logo_dark_object_key: Mapped[str | None] = mapped_column(String(255))
+    branding_logo_surface: Mapped[str] = mapped_column(
+        String(10), default="auto", server_default="auto"
+    )
+    branding_logo_is_dark: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     contact_phone: Mapped[str | None] = mapped_column(String(30))
     contact_email: Mapped[str | None] = mapped_column(String(255))
 

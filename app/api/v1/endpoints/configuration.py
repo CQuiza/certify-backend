@@ -93,6 +93,24 @@ async def get_public_branding(
     return await platform_settings_service.get_public_branding(db)
 
 
+@router.get("/public/logo")
+async def get_public_logo(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Sirve el logo del tenant (público) para páginas de tenant (login, register, catálogo, búsqueda)."""
+    settings = get_settings()
+    if not (settings.minio_access_key and settings.minio_secret_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sin logo")
+    data = await platform_settings_service.get_logo_bytes()
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sin logo")
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/branding/logo")
 async def get_branding_logo(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -127,6 +145,7 @@ async def update_organization(
         dashboard_message=body.dashboard_message,
         contact_phone=body.contact_phone,
         contact_email=str(body.contact_email) if body.contact_email else None,
+        logo_surface=body.logo_surface,
         updated_by=current.id,
     )
 
@@ -213,14 +232,8 @@ async def send_test_email_endpoint(
     return {"detail": "Correo de prueba enviado"}
 
 
-@router.post("/email/logo", status_code=status.HTTP_200_OK)
-async def upload_branding_logo(
-    file: UploadFile,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current: Annotated[User, Depends(get_current_user)],
-) -> dict:
-    """Sube el logo de la organización (PNG/JPG/WebP). Se normaliza a PNG."""
-    _require_superuser(current)
+async def _normalize_logo(file: UploadFile) -> bytes:
+    """Lee, valida y normaliza un logo subido a PNG (RGBA, ≤512px)."""
     data = await file.read()
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Archivo vacío")
@@ -243,8 +256,20 @@ async def upload_branding_logo(
     img.thumbnail((512, 512))
     buf = BytesIO()
     img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@router.post("/email/logo", status_code=status.HTTP_200_OK)
+async def upload_branding_logo(
+    file: UploadFile,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Sube el logo de la organización (PNG/JPG/WebP). Se normaliza a PNG."""
+    _require_superuser(current)
+    png = await _normalize_logo(file)
     try:
-        await platform_settings_service.save_logo(db, buf.getvalue(), updated_by=current.id)
+        await platform_settings_service.save_logo(db, png, updated_by=current.id)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
     logger.info("Logo de marca actualizado por %s", current.email)
@@ -260,6 +285,53 @@ async def restore_branding_logo(
     _require_superuser(current)
     await platform_settings_service.remove_logo(db, updated_by=current.id)
     return {"detail": "Se restauró la marca por defecto"}
+
+
+@router.get("/branding/logo/dark")
+async def get_dark_branding_logo(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    """Sirve el logo para superficies oscuras (sidebar navy). 404 si no existe."""
+    settings = get_settings()
+    if not (settings.minio_access_key and settings.minio_secret_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sin logo")
+    data = await platform_settings_service.get_logo_bytes(variant="dark")
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sin logo")
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.post("/email/logo/dark", status_code=status.HTTP_200_OK)
+async def upload_dark_branding_logo(
+    file: UploadFile,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Sube el logo para fondos oscuros (PNG/JPG/WebP). Se normaliza a PNG."""
+    _require_superuser(current)
+    png = await _normalize_logo(file)
+    try:
+        await platform_settings_service.save_dark_logo(db, png, updated_by=current.id)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    logger.info("Logo oscuro de marca actualizado por %s", current.email)
+    return {"detail": "Logo para fondos oscuros actualizado"}
+
+
+@router.delete("/email/logo/dark", status_code=status.HTTP_200_OK)
+async def restore_dark_branding_logo(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Elimina el logo para fondos oscuros."""
+    _require_superuser(current)
+    await platform_settings_service.remove_dark_logo(db, updated_by=current.id)
+    return {"detail": "Logo para fondos oscuros eliminado"}
 
 
 # ── Plantillas de correo ────────────────────────────────────────────────────
