@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.course_repository import course_repository
+from app.repositories.module_assessment_repository import module_assessment_repository
 from app.repositories.module_repository import module_repository
 from app.schemas.module import ModuleCreate, ModuleRead, ModuleUpdate
 from app.services.access import (
@@ -20,6 +21,21 @@ from app.services.access import (
 )
 
 router = APIRouter(prefix="/modules", tags=["modules"])
+
+
+async def _with_assessment(db: AsyncSession, rows: list) -> list[ModuleRead]:
+    ids = [m.id for m in rows]
+    with_assessment = await module_assessment_repository.module_ids_with_assessment(db, ids)
+    return [
+        ModuleRead(
+            id=m.id,
+            course_id=m.course_id,
+            title=m.title,
+            order_index=m.order_index,
+            has_assessment=m.id in with_assessment,
+        )
+        for m in rows
+    ]
 
 
 @router.get("", response_model=list[ModuleRead])
@@ -37,10 +53,10 @@ async def list_modules(
                 detail="Parámetro course_id obligatorio",
             )
         rows = await module_repository.list(db, skip=skip, limit=limit)
-        return list(rows)
+        return await _with_assessment(db, list(rows))
     await require_course_visible(db, current, course_id, need_content=True)
     rows = await module_repository.list_by_course(db, course_id, skip=skip, limit=limit)
-    return list(rows)
+    return await _with_assessment(db, list(rows))
 
 
 @router.get("/{module_id}", response_model=ModuleRead)
@@ -53,7 +69,7 @@ async def get_module(
     if not m:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Módulo no encontrado")
     await require_course_visible(db, current, m.course_id, need_content=True)
-    return m
+    return (await _with_assessment(db, [m]))[0]
 
 
 @router.post("", response_model=ModuleRead, status_code=status.HTTP_201_CREATED)

@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.core.tenant import tenant_ctx, resolve_default_tenant_id
+from app.models.assessment_question import AssessmentQuestion
 from app.models.course import Course
 from app.models.lesson import Lesson
 from app.models.lesson_task import LessonTask
@@ -202,3 +203,77 @@ async def _tenant_id_by_slug(slug: str) -> int:
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Tenant.id).where(Tenant.slug == slug))
         return result.scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_progress_requires_tasks_and_assessment(client, student_token):
+    """Un módulo solo se completa si se aprobó la evaluación Y se entregaron las tareas."""
+    tid = await _default_tenant()
+    sid = await _student_id()
+    async with AsyncSessionLocal() as session:
+        async with tenant_ctx(tid):
+            course = Course(title="Curso Progreso", status="published")
+            session.add(course)
+            await session.flush()
+            module = Module(course_id=course.id, title="Mod Progreso", order_index=0)
+            session.add(module)
+            await session.flush()
+            assessment = ModuleAssessment(module_id=module.id, passing_score=70)
+            session.add(assessment)
+            await session.flush()
+            session.add(
+                AssessmentQuestion(
+                    assessment_id=assessment.id,
+                    question_text="¿Pregunta?",
+                    question_type="multiple_choice",
+                )
+            )
+            lesson = Lesson(module_id=module.id, title="Lección P", order_index=0)
+            session.add(lesson)
+            await session.flush()
+            task = LessonTask(lesson_id=lesson.id, title="Tarea P", order_index=0)
+            session.add(task)
+            await session.flush()
+            base = datetime(2026, 10, 1, tzinfo=UTC)
+            session.add(
+                UserAssessmentAttempt(
+                    assessment_id=assessment.id,
+                    user_id=sid,
+                    score=90,
+                    passed=True,
+                    started_at=base,
+                    finished_at=base + timedelta(minutes=5),
+                )
+            )
+            await session.commit()
+            course_id = course.id
+            task_id = task.id
+
+    resp = await client.get(
+        f"/api/v1/user-progress/summary/{course_id}", headers=hdr(student_token)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["progress_percent"] == 0
+    assert body["completed_modules"] == 0
+
+    async with AsyncSessionLocal() as session:
+        async with tenant_ctx(tid):
+            session.add(
+                TaskSubmission(
+                    task_id=task_id,
+                    user_id=sid,
+                    file_url="tasks/files/p.pdf",
+                    original_filename="p.pdf",
+                    mime_type="application/pdf",
+                )
+            )
+            await session.commit()
+
+    resp2 = await client.get(
+        f"/api/v1/user-progress/summary/{course_id}", headers=hdr(student_token)
+    )
+    assert resp2.status_code == 200, resp2.text
+    body2 = resp2.json()
+    assert body2["progress_percent"] == 100
+    assert body2["completed_modules"] == 1

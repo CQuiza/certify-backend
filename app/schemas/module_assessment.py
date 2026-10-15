@@ -75,7 +75,7 @@ class AssessmentQuestionReadWithCorrect(AssessmentQuestionRead):
 
 class ModuleAssessmentCreate(BaseModel):
     passing_score: int = Field(default=70, ge=1, le=100)
-    questions: list[AssessmentQuestionCreate]
+    questions: list[AssessmentQuestionCreate] = Field(..., min_length=1)
 
 
 class ModuleAssessmentRead(BaseModel):

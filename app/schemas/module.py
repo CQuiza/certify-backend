@@ -21,5 +21,6 @@ class ModuleRead(BaseModel):
     course_id: int
     title: str
     order_index: int
+    has_assessment: bool = False
 
     model_config = ConfigDict(from_attributes=True)

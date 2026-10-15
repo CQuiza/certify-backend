@@ -16,6 +16,14 @@ def _options(*correct_indices: int) -> list[dict]:
     ]
 
 
+def _valid_question() -> dict:
+    return {
+        "question_text": "¿Cuál es la correcta?",
+        "question_type": "multiple_choice",
+        "options": _options(1),
+    }
+
+
 def test_multiple_choice_requires_correct_option():
     with pytest.raises(ValidationError):
         AssessmentQuestionCreate(
@@ -43,8 +51,14 @@ def test_multiple_choice_accepts_single_correct_option():
     assert sum(o.is_correct for o in question.options) == 1
 
 
+def test_assessment_requires_at_least_one_question():
+    with pytest.raises(ValidationError):
+        ModuleAssessmentCreate(questions=[])
+    ModuleAssessmentCreate(questions=[_valid_question()])
+
+
 def test_passing_score_must_be_within_bounds():
     with pytest.raises(ValidationError):
-        ModuleAssessmentCreate(passing_score=101, questions=[])
+        ModuleAssessmentCreate(passing_score=101, questions=[_valid_question()])
     with pytest.raises(ValidationError):
-        ModuleAssessmentCreate(passing_score=0, questions=[])
+        ModuleAssessmentCreate(passing_score=0, questions=[_valid_question()])

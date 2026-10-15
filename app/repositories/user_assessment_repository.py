@@ -280,7 +280,9 @@ class UserAssessmentRepository:
 
             total_tasks, submitted_tasks, tasks = task_progress_cache.get(mod.id, (0, 0, []))
 
-            if passed:
+            assessment_ok = total_questions == 0 or passed
+            tasks_ok = total_tasks == 0 or submitted_tasks == total_tasks
+            if assessment_ok and tasks_ok:
                 completed_count += 1
 
             modules_items.append(
@@ -400,7 +402,11 @@ class UserAssessmentRepository:
                 )
 
             total = len(modules_data)
-            completed = sum(1 for m in modules_data if m.passed)
+            completed = sum(
+                1 for m in modules_data
+                if (m.total_assessment_questions == 0 or m.passed)
+                and (m.total_tasks == 0 or m.submitted_tasks == m.total_tasks)
+            )
             pct = (completed / total * 100) if total > 0 else 0.0
 
             summaries.append(

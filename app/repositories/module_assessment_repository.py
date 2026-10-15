@@ -40,6 +40,19 @@ class ModuleAssessmentRepository:
         )
         return r.scalar_one_or_none()
 
+    async def module_ids_with_assessment(
+        self, db: AsyncSession, module_ids: list[int]
+    ) -> set[int]:
+        """Devuelve el subconjunto de module_ids que tienen evaluación configurada."""
+        if not module_ids:
+            return set()
+        r = await db.execute(
+            select(ModuleAssessment.module_id).where(
+                ModuleAssessment.module_id.in_(module_ids)
+            )
+        )
+        return {row[0] for row in r.all()}
+
     async def create_with_questions(
         self,
         db: AsyncSession,
