@@ -78,6 +78,14 @@ async def test_course_image_upload_serve_and_delete(client, superuser_token, fak
     row = next(c for c in listing.json() if c["id"] == cid)
     assert row["has_image"] is True
 
+    # El catálogo público (CoursePublicRead) también expone has_image.
+    await client.patch(
+        f"/api/v1/courses/{cid}", headers=hdr(superuser_token), json={"status": "published"}
+    )
+    catalog = await client.get("/api/v1/courses?catalog=true")
+    cat_row = next((c for c in catalog.json() if c["id"] == cid), None)
+    assert cat_row is not None and cat_row["has_image"] is True
+
     # Borrado: limpia la imagen y el objeto.
     dele = await client.delete(
         f"/api/v1/courses/{cid}/image", headers=hdr(superuser_token)
