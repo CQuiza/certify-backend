@@ -95,8 +95,14 @@ class Settings(BaseSettings):
     minio_path_branding: str = Field(
         default="platform/branding", alias="MINIO_PATH_BRANDING"
     )
+    minio_path_course_images: str = Field(
+        default="courses/images", alias="MINIO_PATH_COURSE_IMAGES"
+    )
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_region: str = Field(default="", alias="MINIO_REGION")
+    media_public_base_url: str | None = Field(
+        default=None, alias="MEDIA_PUBLIC_BASE_URL"
+    )
 
     environment: Literal["development", "staging", "production"] = Field(
         default="development",

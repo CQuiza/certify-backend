@@ -44,6 +44,7 @@ class CourseRead(BaseModel):
     price: Decimal | None = None
     renewal_price: Decimal | None = None
     is_for_sale: bool = False
+    has_image: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -58,5 +59,6 @@ class CoursePublicRead(BaseModel):
     price: Decimal | None = None
     renewal_price: Decimal | None = None
     is_for_sale: bool = False
+    has_image: bool = False
 
     model_config = ConfigDict(from_attributes=True)

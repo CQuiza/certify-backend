@@ -66,6 +66,11 @@ class Course(TenantScoped, Base):
     is_for_sale: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
+    image_object_key: Mapped[str | None] = mapped_column(Text)
+
+    @property
+    def has_image(self) -> bool:
+        return bool(self.image_object_key)
 
     teacher: Mapped[User | None] = relationship(
         "User",
