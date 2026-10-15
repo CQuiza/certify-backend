@@ -20,6 +20,7 @@ from app.models.payment import CourseOrder, CourseOrderItem
 from app.models.user import User
 from app.repositories.certificate_repository import certificate_repository
 from app.repositories.course_repository import course_repository
+from app.repositories.pending_certificate_repository import pending_certificate_repository
 from app.schemas.payment import CheckoutRequest, CheckoutResponse, OrderItemRead, OrderRead
 from app.services.access import is_super_or_admin
 from app.services.payment_service import (
@@ -138,6 +139,12 @@ async def renew_checkout(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo se pueden renovar certificados vencidos")
     if cert.course_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El certificado no tiene curso asociado")
+
+    if await pending_certificate_repository.get_in_progress_renewal(db, cert.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ya tienes una renovación en curso para este certificado",
+        )
 
     course = await course_repository.get_by_id(db, cert.course_id)
     if course is None:

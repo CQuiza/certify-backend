@@ -278,3 +278,51 @@ async def test_completion_renews_same_certificate(db, monkeypatch):
     if exp.tzinfo is None:
         exp = exp.replace(tzinfo=UTC)
     assert exp > datetime.now(UTC)
+
+
+@pytest.mark.asyncio
+async def test_can_renew_false_while_renewal_in_progress(client, student_token, db):
+    """El botón (can_renew) se oculta cuando ya hay una renovación en curso."""
+    me = await client.get("/api/v1/auth/me", headers=hdr(student_token))
+    student_id = me.json()["id"]
+    course, _, _ = await _build_course(
+        db, title="Curso CanRenew", price=0, renewal_price=0, with_task=False
+    )
+    cert = await _make_expired_cert(db, user_id=student_id, course_id=course.id)
+    await db.commit()
+
+    listing = await client.get("/api/v1/certificates", headers=hdr(student_token))
+    assert listing.status_code == 200, listing.text
+    row = next(c for c in listing.json()["items"] if c["id"] == cert.id)
+    assert row["can_renew"] is True
+
+    started = await client.post(
+        f"/api/v1/payments/renew/{cert.id}", headers=hdr(student_token)
+    )
+    assert started.status_code == 200, started.text
+
+    listing2 = await client.get("/api/v1/certificates", headers=hdr(student_token))
+    row2 = next(c for c in listing2.json()["items"] if c["id"] == cert.id)
+    assert row2["can_renew"] is False
+
+
+@pytest.mark.asyncio
+async def test_renew_guard_blocks_second_attempt(client, student_token, db):
+    """No se puede iniciar dos veces la renovación del mismo certificado."""
+    me = await client.get("/api/v1/auth/me", headers=hdr(student_token))
+    student_id = me.json()["id"]
+    course, _, _ = await _build_course(
+        db, title="Curso Guard", price=0, renewal_price=0, with_task=False
+    )
+    cert = await _make_expired_cert(db, user_id=student_id, course_id=course.id)
+    await db.commit()
+
+    first = await client.post(
+        f"/api/v1/payments/renew/{cert.id}", headers=hdr(student_token)
+    )
+    assert first.status_code == 200, first.text
+
+    second = await client.post(
+        f"/api/v1/payments/renew/{cert.id}", headers=hdr(student_token)
+    )
+    assert second.status_code == 409, second.text

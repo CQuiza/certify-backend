@@ -47,6 +47,9 @@ async def _enrich_student_certificates(db, rows) -> list:
     if course_ids:
         for course in await course_repository.list_by_ids(db, list(course_ids)):
             courses[course.id] = course
+    renewing = await pending_certificate_repository.renewal_in_progress_certificate_ids(
+        db, [c.id for c in rows]
+    )
     items = []
     for c in rows:
         item = CertificateRead.model_validate(c)
@@ -56,7 +59,7 @@ async def _enrich_student_certificates(db, rows) -> list:
             item.renewal_price = (
                 course.renewal_price if course.renewal_price is not None else course.price
             )
-            item.can_renew = c.status == "expired"
+            item.can_renew = c.status == "expired" and c.id not in renewing
         items.append(item)
     return items
 

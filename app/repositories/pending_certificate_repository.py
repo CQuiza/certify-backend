@@ -39,6 +39,32 @@ class PendingCertificateRepository:
         )
         return r.scalars().all()
 
+    async def renewal_in_progress_certificate_ids(
+        self, db: AsyncSession, certificate_ids: list[int]
+    ) -> set[int]:
+        """Ids de certificados que ya tienen una renovación en curso."""
+        if not certificate_ids:
+            return set()
+        r = await db.execute(
+            select(PendingCertificate.renewal_of_certificate_id).where(
+                PendingCertificate.renewal_of_certificate_id.in_(certificate_ids),
+                PendingCertificate.status == "in_progress",
+            )
+        )
+        return {row[0] for row in r.all() if row[0] is not None}
+
+    async def get_in_progress_renewal(
+        self, db: AsyncSession, certificate_id: int
+    ) -> PendingCertificate | None:
+        """Renovación en curso para un certificado, si existe."""
+        r = await db.execute(
+            select(PendingCertificate).where(
+                PendingCertificate.renewal_of_certificate_id == certificate_id,
+                PendingCertificate.status == "in_progress",
+            )
+        )
+        return r.scalars().first()
+
     async def list_by_user(
         self, db: AsyncSession, user_id: int | None = None
     ) -> Sequence[PendingCertificate]:
