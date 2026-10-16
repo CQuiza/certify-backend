@@ -40,12 +40,14 @@ def _logo_is_dark(data: bytes) -> bool:
         img = Image.open(BytesIO(data)).convert("RGBA")
     except Exception:
         return False
+    img.thumbnail((64, 64))
+    raw = img.tobytes()
     total = 0.0
     count = 0
-    for r, g, b, a in img.getdata():
-        if a < 16:
+    for i in range(0, len(raw), 4):
+        if raw[i + 3] < 16:  # alpha casi transparente
             continue
-        total += 0.299 * r + 0.587 * g + 0.114 * b
+        total += 0.299 * raw[i] + 0.587 * raw[i + 1] + 0.114 * raw[i + 2]
         count += 1
     if count == 0:
         return False

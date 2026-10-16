@@ -292,3 +292,82 @@ async def test_logo_endpoints_mocked(client, superuser_token, monkeypatch):
     restored = await client.delete("/api/v1/configuration/email/logo", headers=headers)
     assert restored.status_code == 200
     assert "data" not in saved
+
+
+@pytest.mark.asyncio
+async def test_branding_logo_variants(client, superuser_token, monkeypatch):
+    """Logo principal (luminancia), logo oscuro y superficie se persisten y sirven."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    from app.core.settings import get_settings
+    import app.utils.minio_client as minio_module
+
+    _s = get_settings()
+    monkeypatch.setattr(_s, "minio_access_key", "test")
+    monkeypatch.setattr(_s, "minio_secret_key", "test")
+
+    store: dict[str, bytes] = {}
+
+    class FakeMinio:
+        def ensure_bucket(self):  # noqa: D401
+            return None
+
+        def upload_bytes(self, object_name, data, *, content_type):  # noqa: ANN001
+            store[object_name] = data
+
+        def download_bytes(self, object_name):  # noqa: ANN001
+            return store[object_name]
+
+        def remove_object(self, object_name):  # noqa: ANN001
+            store.pop(object_name, None)
+
+    monkeypatch.setattr(minio_module, "get_minio_client", lambda settings=None: FakeMinio())
+
+    headers = _auth_headers(superuser_token)
+
+    def png(color):  # noqa: ANN001
+        buf = BytesIO()
+        Image.new("RGB", (16, 16), color=color).save(buf, format="PNG")
+        return buf.getvalue()
+
+    # Logo principal oscuro → logo_is_dark True
+    up = await client.post(
+        "/api/v1/configuration/email/logo",
+        headers=headers,
+        files={"file": ("l.png", png((10, 10, 10)), "image/png")},
+    )
+    assert up.status_code == 200, up.text
+    b = await client.get("/api/v1/configuration/branding", headers=headers)
+    assert b.json()["has_custom_logo"] is True
+    assert b.json()["logo_is_dark"] is True
+
+    # Logo para fondos oscuros
+    upd = await client.post(
+        "/api/v1/configuration/email/logo/dark",
+        headers=headers,
+        files={"file": ("d.png", png((240, 240, 240)), "image/png")},
+    )
+    assert upd.status_code == 200, upd.text
+    b2 = await client.get("/api/v1/configuration/branding", headers=headers)
+    assert b2.json()["has_dark_logo"] is True
+
+    served = await client.get("/api/v1/configuration/branding/logo/dark", headers=headers)
+    assert served.status_code == 200
+    assert served.content.startswith(b"\x89PNG")
+
+    # Superficie configurable
+    put = await client.put(
+        "/api/v1/configuration/organization",
+        headers=headers,
+        json={"logo_surface": "light"},
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["logo_surface"] == "light"
+
+    # Quitar logo oscuro
+    dele = await client.delete("/api/v1/configuration/email/logo/dark", headers=headers)
+    assert dele.status_code == 200
+    b3 = await client.get("/api/v1/configuration/branding", headers=headers)
+    assert b3.json()["has_dark_logo"] is False
