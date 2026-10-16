@@ -67,7 +67,7 @@ Roles (`app/models/enums.py`): `superuser`, `admin`, `teacher`, `student`. El co
 
 | Rol | Alcance |
 |---|---|
-| **superuser** | Global (todas las organizaciones): gestión de tenants, impersonación, configuración de plataforma, backups, monitoreo, todo el RBAC. Único que crea/edita superusuarios. |
+| **superuser** | Global (todas las organizaciones): gestión de tenants, impersonación, configuración de plataforma, monitoreo, todo el RBAC. Único que crea/edita superusuarios. |
 | **admin** | Dentro de su organización: usuarios (excepto superusuarios), cursos, módulos/lecciones/tareas/evaluaciones, inscripciones, certificados, tipos, reportes, auditoría. |
 | **teacher** | Solo sus cursos: contenido, tareas, evaluaciones, calificación de entregas, inscripción de estudiantes de sus cursos. |
 | **student** | Consume cursos inscritos/comprados, entrega tareas, presenta evaluaciones, consulta progreso y certificados, autoservicio de renovación. |
@@ -138,7 +138,7 @@ Todos los routers se montan bajo `/api/v1` (`app/api/v1/router.py`). Resumen:
 | Configuración | `/configuration` | branding, SMTP, plantillas, pagos, plantilla de certificado |
 | Reportes / dashboard | `/reports`, `/dashboard` | catálogo de reportes, stats |
 | Monitoreo | `/monitoring` | logs (GET/POST) |
-| Administración | `/admin/tenants` | tenants, impersonación, backup SQL |
+| Administración | `/admin/tenants` | tenants, impersonación |
 | Auditoría | `/certificate-audit`, `/user-audit`, `/worker-audit`, `/email-audit` | listados |
 | Salud | — | `/health`, `/health/workers` |
 

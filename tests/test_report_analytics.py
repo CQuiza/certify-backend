@@ -1,4 +1,4 @@
-"""Analítica: historial de intentos, calificación de tareas, chart y backup."""
+"""Analítica: historial de intentos, calificación de tareas y chart."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -185,24 +185,6 @@ async def test_teacher_cannot_grade_foreign_course(client, superuser_token, teac
         json={"score": 90, "feedback": ""},
     )
     assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_backup_guard_on_sqlite(client, superuser_token, tenant_b_credentials, tenant_b_admin_token):
-    acme_id = await _tenant_id_by_slug("acme")
-    resp = await client.get(f"/api/v1/admin/tenants/{acme_id}/backup-sql", headers=hdr(superuser_token))
-    assert resp.status_code == 501  # sqlite no soporta pg_dump
-
-    denied = await client.get(f"/api/v1/admin/tenants/{acme_id}/backup-sql", headers=hdr(tenant_b_admin_token))
-    assert denied.status_code == 403
-
-
-async def _tenant_id_by_slug(slug: str) -> int:
-    from app.models.tenant import Tenant
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Tenant.id).where(Tenant.slug == slug))
-        return result.scalar_one()
 
 
 @pytest.mark.asyncio
