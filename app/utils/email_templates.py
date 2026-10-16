@@ -70,7 +70,7 @@ DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
 
 #: Descripción de placeholders disponibles para mostrar en la UI.
 PLACEHOLDERS: dict[str, str] = {
-    "app_name": "Nombre de la plataforma (ej. Certify)",
+    "app_name": "Nombre de la plataforma (ej. Formativa)",
     "organization_name": "Nombre de la organización",
     "student_name": "Nombre del estudiante",
     "email": "Correo del destinatario",

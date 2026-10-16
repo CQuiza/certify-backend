@@ -102,7 +102,7 @@ async def create_preference(db: AsyncSession, order: CourseOrder, base_url: str,
             "pending": f"{origin}/payments/order/{order.id}?status=pending",
             "failure": f"{origin}/payments/order/{order.id}?status=failure",
         },
-        "statement_descriptor": "Certify",
+        "statement_descriptor": settings.project_name[:22],
     }
 
     # Modo split (SaaS): el tenant recibe la venta y la plataforma retiene su comisión.

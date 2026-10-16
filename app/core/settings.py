@@ -117,14 +117,14 @@ class Settings(BaseSettings):
 
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
 
-    project_name: str = Field(default="Certify API", alias="PROJECT_NAME")
+    project_name: str = Field(default="Formativa", alias="PROJECT_NAME")
 
     # Superusuario inicial (seed)
-    superuser_email: str = Field(default="admin@certify.local", alias="SUPERUSER_EMAIL")
+    superuser_email: str = Field(default="admin@formativa.local", alias="SUPERUSER_EMAIL")
     superuser_password: str = Field(default="Ch4ng3M3!", alias="SUPERUSER_PASSWORD")
     superuser_name: str = Field(default="Admin", alias="SUPERUSER_NAME")
     superuser_first_last_name: str = Field(
-        default="Certify", alias="SUPERUSER_FIRST_LAST_NAME"
+        default="Formativa", alias="SUPERUSER_FIRST_LAST_NAME"
     )
     superuser_identity_type: str = Field(default="CC", alias="SUPERUSER_IDENTITY_TYPE")
     superuser_identity_number: str = Field(
@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     )
 
     system_bot_user_email: str = Field(
-        default="system@certify.com", alias="SYSTEM_BOT_USER_EMAIL"
+        default="system@formativa.com", alias="SYSTEM_BOT_USER_EMAIL"
     )
     system_bot_user_name: str = Field(
         default="System", alias="SYSTEM_BOT_USER_NAME"

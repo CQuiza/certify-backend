@@ -2,8 +2,9 @@
 
 Marca/organización, SMTP y plantillas de correo, más la plantilla de
 certificado (patrón existente). La lectura de marca (branding) está reservada
-a usuarios autenticados: las páginas públicas conservan la marca por defecto
-de Certify.
+a usuarios autenticados; las páginas de tenant (login, registro, catálogo y
+búsqueda) usan el logo del tenant, y Home/FAQ conservan la marca por defecto
+de la plataforma.
 """
 
 import logging

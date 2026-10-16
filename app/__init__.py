@@ -1,1 +1,1 @@
-"""Paquete de la aplicación Certify Backend."""
+"""Paquete de la aplicación backend."""
