@@ -27,10 +27,6 @@ celery_app.conf.beat_schedule = {
     },
     "hacer-backup-bd-cada-madrugada": {
         "task": "app.workers.tasks.backup_database_to_minio",
-        "schedule": crontab(hour=1, minute=0),
-    },
-    "hacer-backup-bd-cada-madrugada": {
-        "task": "app.workers.tasks.backup_database_to_minio",
         "schedule": crontab(hour=1, minute=0),  # Todos los días a las 01:00
     },
 }

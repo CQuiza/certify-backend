@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from app.core.database import AsyncSessionLocal
 from app.repositories.system_log_repository import system_log_repository
 
@@ -27,10 +29,15 @@ async def write_system_log(
     method: str | None = None,
     status_code: int | None = None,
     user_id: int | None = None,
+    session_factory: async_sessionmaker[AsyncSession] = AsyncSessionLocal,
 ) -> None:
-    """Persiste un evento en ``system_logs``. Silencioso ante fallos."""
+    """Persiste un evento en ``system_logs``. Silencioso ante fallos.
+
+    ``session_factory`` permite que los workers usen su propia sesión (engine
+    con ``NullPool``) en lugar de la compartida con la API.
+    """
     try:
-        async with AsyncSessionLocal() as session:
+        async with session_factory() as session:
             await system_log_repository.create(
                 session,
                 level=level,

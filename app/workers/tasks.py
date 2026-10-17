@@ -2,6 +2,7 @@
 Ejecuta las tareas diarias de expiración de certificados y backups de base de datos.
 """
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -12,7 +13,6 @@ from celery import shared_task
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.core.database import AsyncSessionLocal
 from app.core.settings import get_settings
 from app.core.tenant import tenant_ctx
 from app.models import LessonTask  # noqa: F401 — asegura registro del mapper
@@ -27,16 +27,23 @@ from app.utils.certificate_editor import apply_revoked_watermark_pdf
 from app.utils.minio_client import get_minio_client
 from app.utils.email import send_certificate_expired_email
 from app.utils.worker_audit import log_worker_action
+from app.workers.db import WorkerSessionLocal
 
 logger = logging.getLogger(__name__)
+
+
+async def _safe_rollback(session) -> None:
+    """Revierte una sesión comprometida sin enmascarar el error original."""
+    try:
+        await session.rollback()
+    except Exception:
+        logger.exception("No se pudo revertir la sesión del worker")
 
 
 def _persist_worker_log_sync(
     task_name: str, level: str, detail: str, stacktrace: str | None = None
 ) -> None:
     """Registra en ``system_logs`` un evento de worker (API transversal)."""
-    import asyncio
-
     from app.services.system_log_service import write_system_log
 
     try:
@@ -47,6 +54,7 @@ def _persist_worker_log_sync(
                 event=f"worker:{task_name}",
                 detail=detail[:500] if detail else None,
                 stacktrace=stacktrace,
+                session_factory=WorkerSessionLocal,
             )
         )
     except Exception:
@@ -55,8 +63,6 @@ def _persist_worker_log_sync(
 
 def _run_worker_task(task_name: str, coro) -> None:
     """Ejecuta la tarea asíncrona y registra inicio/fin/error en system_logs."""
-    import asyncio
-
     try:
         asyncio.run(coro)
     except Exception as exc:
@@ -87,7 +93,7 @@ async def _async_check_expired_certificates():
     processed = 0
     errors = []
 
-    async with AsyncSessionLocal() as session:
+    async with WorkerSessionLocal() as session:
         await log_worker_action(
             session, task_name=task_name, status=WorkerStatus.running.value,
             started_at=started_at,
@@ -229,7 +235,7 @@ async def _async_backup_database_to_minio():
     ]
 
     try:
-        async with AsyncSessionLocal() as session:
+        async with WorkerSessionLocal() as session:
             try:
                 await log_worker_action(
                     session, task_name=task_name, status=WorkerStatus.running.value,
@@ -238,15 +244,16 @@ async def _async_backup_database_to_minio():
                 await session.flush()
 
                 logger.info("Iniciando pg_dump para backup %s", filename)
-                subprocess.run(cmd, env=env, check=True, capture_output=True)
+                await asyncio.to_thread(subprocess.run, cmd, env=env, check=True, capture_output=True)
                 logger.info("pg_dump completado para %s", filename)
 
                 minio_client = get_minio_client(settings)
-                minio_client.ensure_bucket()
+                await asyncio.to_thread(minio_client.ensure_bucket)
 
                 object_name = f"{settings.minio_path_backup_db.strip('/')}/{filename}"
 
-                minio_client.client.fput_object(
+                await asyncio.to_thread(
+                    minio_client.client.fput_object,
                     minio_client.bucket,
                     object_name,
                     filepath,
@@ -256,19 +263,21 @@ async def _async_backup_database_to_minio():
                     },
                 )
 
-                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                file_size = await asyncio.to_thread(os.path.getsize, filepath) if os.path.exists(filepath) else 0
 
                 status = WorkerStatus.success.value
                 details = f"Backup {filename} subido a MinIO ({file_size} bytes)"
                 logger.info(details)
 
             except subprocess.CalledProcessError as e:
+                await _safe_rollback(session)
                 detail_str = e.stderr.decode("utf-8", errors="replace")
                 status = WorkerStatus.failed.value
                 details = f"pg_dump falló: {detail_str}"
                 logger.error(details)
 
             except Exception as e:
+                await _safe_rollback(session)
                 status = WorkerStatus.failed.value
                 details = f"Error en backup: {e}"
                 logger.exception(details)
