@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user, get_optional_user
-from app.core.database import get_db
+from app.core.database import get_db, get_db_public
 from app.models.user import User
 from app.repositories.certificate_type_repository import certificate_type_repository
 from app.schemas.certificate_type import (
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/certificate-types", tags=["certificate-types"])
 
 @router.get("", response_model=list[CertificateTypeRead])
 async def list_certificate_types(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
     optional_user: Annotated[User | None, Depends(get_optional_user)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=10000)] = 5000,

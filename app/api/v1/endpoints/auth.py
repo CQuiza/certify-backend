@@ -12,10 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
-from app.core.database import get_db
+from app.core.database import get_db, get_db_public, get_db_unscoped, set_rls_context
+from app.core.tenant import make_tenant_token, reset_tenant_context
 from app.core.rate_limit import limiter
 from app.core.security import (
+    CSRF_COOKIE_NAME,
     create_access_token,
+    generate_csrf_token,
     generate_refresh_token,
     get_password_hash,
     hash_refresh_token,
@@ -32,6 +35,20 @@ from app.services.user_service import user_service
 router = APIRouter(tags=["auth"])
 
 logger = logging.getLogger(__name__)
+
+
+def _set_csrf_cookie(response: Response, settings, token: str) -> None:
+    """Cookie legible por JS para el patrón double-submit."""
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=token,
+        httponly=False,
+        secure=settings.environment == "production",
+        samesite="lax",
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/",
+        domain=settings.cookie_domain,
+    )
 
 
 class RegisterRequest(BaseModel):
@@ -51,7 +68,7 @@ async def register_student(
     request: Request,
     response: Response,
     body: RegisterRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
 ) -> Token:
     """Registro público de estudiantes (compra autónoma)."""
     email = str(body.email).strip().lower()
@@ -99,6 +116,7 @@ async def register_student(
         path="/api/v1",
         domain=settings.cookie_domain,
     )
+    _set_csrf_cookie(response, settings, generate_csrf_token())
     logger.info("Estudiante registrado — id=%s email=%s", user.id, user.email)
     return Token(access_token=token, refresh_token=refresh_token)
 
@@ -108,7 +126,7 @@ async def register_student(
 async def login(
     request: Request,
     response: Response,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
     user: User | None
@@ -148,6 +166,7 @@ async def login(
         path="/api/v1",
         domain=settings.cookie_domain,
     )
+    _set_csrf_cookie(response, settings, generate_csrf_token())
     return Token(access_token=token, refresh_token=refresh_token)
 
 
@@ -156,7 +175,7 @@ async def login(
 async def refresh_access_token(
     request: Request,
     body: RefreshRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
 ) -> JSONResponse:
     hashed = hash_refresh_token(body.refresh_token)
     r = await db.execute(
@@ -172,14 +191,21 @@ async def refresh_access_token(
             detail="Refresh token inválido o expirado",
         )
 
-    new_access = create_access_token(
-        subject=user.id, extra_claims={"tenant_id": user.tenant_id, "role": user.role}
-    )
-    new_refresh = generate_refresh_token()
-    user.refresh_token_hash = hash_refresh_token(new_refresh)
-    user.refresh_token_expires_at = refresh_token_expires_at()
-    db.add(user)
-    await db.flush()
+    # El refresh token es global: después de localizar al usuario, se opera
+    # dentro de su tenant para mantener el aislamiento.
+    tenant_token = make_tenant_token(user.tenant_id)
+    try:
+        await set_rls_context(db, user.tenant_id)
+        new_access = create_access_token(
+            subject=user.id, extra_claims={"tenant_id": user.tenant_id, "role": user.role}
+        )
+        new_refresh = generate_refresh_token()
+        user.refresh_token_hash = hash_refresh_token(new_refresh)
+        user.refresh_token_expires_at = refresh_token_expires_at()
+        db.add(user)
+        await db.flush()
+    finally:
+        reset_tenant_context(tenant_token)
 
     settings = get_settings()
     content = Token(access_token=new_access, refresh_token=new_refresh).model_dump()
@@ -194,6 +220,7 @@ async def refresh_access_token(
         path="/api/v1",
         domain=settings.cookie_domain,
     )
+    _set_csrf_cookie(resp, settings, generate_csrf_token())
     return resp
 
 
@@ -209,6 +236,7 @@ async def logout(
     settings = get_settings()
     resp = JSONResponse(content={"message": "Sesión cerrada"})
     resp.delete_cookie(key="access_token", httponly=True, path="/api/v1", domain=settings.cookie_domain)
+    resp.delete_cookie(key=CSRF_COOKIE_NAME, path="/", domain=settings.cookie_domain)
     resp.delete_cookie(key="acting_tenant", httponly=True, path="/api/v1", domain=settings.cookie_domain)
     return resp
 

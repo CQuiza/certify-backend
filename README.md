@@ -72,7 +72,9 @@ Roles (`app/models/enums.py`): `superuser`, `admin`, `teacher`, `student`. El co
 | **teacher** | Solo sus cursos: contenido, tareas, evaluaciones, calificación de entregas, inscripción de estudiantes de sus cursos. |
 | **student** | Consume cursos inscritos/comprados, entrega tareas, presenta evaluaciones, consulta progreso y certificados, autoservicio de renovación. |
 
-**Aislamiento multitenant** (sin RLS de PostgreSQL): un `ContextVar` (`current_tenant_id`) más un `AsyncSession` personalizado inyecta `with_loader_criteria(tenant_id == …)` en cada consulta ORM y estampa `tenant_id` al insertar. La resolución del tenant sigue el orden: claim `tenant_id` del JWT → impersonación del superusuario (`X-Acting-Tenant` / cookie) → host (`{slug}.{ROOT_DOMAIN}` o dominio custom) → tenant por defecto.
+**Aislamiento multitenant**: un `ContextVar` (`current_tenant_id`) más un `AsyncSession` personalizado inyecta `with_loader_criteria(tenant_id == …)` en cada consulta ORM y estampa `tenant_id` al insertar. La resolución del tenant sigue el orden: claim `tenant_id` del JWT → impersonación del superusuario (`X-Acting-Tenant` / cookie) → host (`{slug}.{ROOT_DOMAIN}` o dominio custom) → tenant por defecto.
+
+**RLS de PostgreSQL (defensa en profundidad)**: la migración `0015_add_rls` activa RLS y políticas por tenant en las tablas de negocio. La sesión fija `app.tenant_id` y `app.rls_bypass` al iniciar la transacción; los contextos *unscoped* activan el bypass de forma explícita. Para que RLS sea efectivo, la API y los workers deben conectar con un rol **NOSUPERUSER NOBYPASSRLS**; el rol propietario se reserva para migraciones. El arranque en producción falla si detecta un rol superusuario o con `BYPASSRLS`.
 
 ## Módulos funcionales
 
@@ -334,7 +336,7 @@ Con la aplicación en marcha:
 
 ## Notas y limitaciones conocidas
 
-- **Aislamiento multitenant a nivel de aplicación** (no RLS de PostgreSQL). Los contextos *unscoped* (panel de superadmin, workers, webhooks) omiten el filtro de tenant de forma intencional.
+- **Aislamiento multitenant en aplicación y RLS de PostgreSQL**. Los contextos *unscoped* (panel de superadmin, workers, webhooks) omiten el filtro de tenant y el RLS de forma intencional; deben revisarse con cuidado.
 - El `action` de auditoría `renewal_started` no está en el enum `CertificateAuditAction`.
 - La plantilla de correo `purchase_confirmation` existe por defecto pero no es personalizable por `/configuration` (el enum/constraint solo admite 3 tipos).
 - `CHECK_EXPIRED_INTERVAL_HOURS` está definido pero el *beat* usa un crontab fijo.

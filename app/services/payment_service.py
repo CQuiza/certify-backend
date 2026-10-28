@@ -15,6 +15,7 @@ import logging
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import set_rls_context
 from app.core.settings import get_settings
 from app.core.tenant import tenant_ctx, unscoped_ctx
 from app.models.payment import CourseOrder
@@ -278,6 +279,7 @@ async def process_payment(db: AsyncSession, payment: dict) -> CourseOrder | None
         return order  # ya procesado (idempotente)
 
     async with tenant_ctx(order.tenant_id):
+        await set_rls_context(db, order.tenant_id)
         if status == "approved":
             order.status = "approved"
             order.external_id = str(payment.get("id"))

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
-from app.core.database import get_db
+from app.core.database import get_db, get_db_unscoped
 from app.core.settings import get_settings
 from app.models.certificate import Certificate
 from app.models.course import Course
@@ -245,7 +245,7 @@ async def get_order(
 @router.post("/webhook")
 async def payment_webhook(
     request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
 ):
     """Notificación de Mercado Pago.
 

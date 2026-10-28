@@ -13,6 +13,7 @@ from celery import shared_task
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from app.core.database import set_rls_context
 from app.core.settings import get_settings
 from app.core.tenant import tenant_ctx
 from app.models import LessonTask  # noqa: F401 — asegura registro del mapper
@@ -124,6 +125,7 @@ async def _async_check_expired_certificates():
             # El procesamiento (auditorías, correo, plantillas) se ejecuta en el
             # tenant del certificado para mantener el aislamiento por-tenant.
             async with tenant_ctx(cert.tenant_id):
+                await set_rls_context(session, cert.tenant_id)
                 system_user = await user_repository.get_by_email(
                     session, settings.system_bot_user_email
                 )

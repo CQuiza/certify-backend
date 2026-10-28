@@ -18,8 +18,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 #: Valores especiales del ContextVar.
 _UNSET = object()
 _UNSCOPED = -1
+#: Request sin tenant resuelto: las consultas deben fallar, no caer al default.
+_MISSING = object()
 
 _tenant_var: ContextVar[object] = ContextVar("tenant_id", default=_UNSET)
+
+
+class TenantContextRequired(RuntimeError):
+    """Se intentó consultar datos de tenant sin un tenant resuelto."""
 
 
 class TenantScoped:
@@ -43,11 +49,16 @@ def is_tenant_context_set() -> bool:
 
 
 def current_tenant_id() -> int | None:
-    """Tenant activo, o ``None`` si no aplica filtro (unscoped)."""
+    """Tenant activo, o ``None`` si no aplica filtro (unscoped o sin resolver)."""
     value = _tenant_var.get()
-    if value is _UNSET or value == _UNSCOPED:
+    if value is _UNSET or value is _UNSCOPED or value is _MISSING:
         return None
     return int(value)  # type: ignore[arg-type]
+
+
+def tenant_context_missing() -> bool:
+    """True cuando el request llegó sin un tenant resuelto."""
+    return _tenant_var.get() is _MISSING
 
 
 def set_tenant_id(tenant_id: int) -> None:
@@ -61,6 +72,11 @@ def reset_tenant_context(token) -> None:
 def make_tenant_token(tenant_id: int | None):
     """Setea el contexto y devuelve el token para resetearlo."""
     return _tenant_var.set(_UNSCOPED if tenant_id is None else int(tenant_id))
+
+
+def make_missing_tenant_token():
+    """Marca el request como sin tenant; las consultas de tenant fallarán."""
+    return _tenant_var.set(_MISSING)
 
 
 @asynccontextmanager

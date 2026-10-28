@@ -10,11 +10,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.core.rate_limit import limiter
+from app.core.security import CSRF_COOKIE_NAME, verify_csrf_token
+from app.core.tenant import TenantContextRequired
 
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.core.logging_config import configure_logging, request_id_var
@@ -181,9 +183,74 @@ async def _seed_system_bot(db_session=None) -> None:
         logger.info("System bot '%s' creado.", settings.system_bot_user_email)
 
 
+def _validate_production_settings() -> None:
+    """Evita arrancar producción con defaults de desarrollo."""
+    from app.core.security import validate_password_strength
+
+    settings = get_settings()
+    if settings.environment != "production":
+        return
+
+    errors: list[str] = []
+    password = settings.superuser_password or ""
+    if not password or password == "Ch4ng3M3!":
+        errors.append("SUPERUSER_PASSWORD debe definirse con una contraseña fuerte")
+    else:
+        password_errors = validate_password_strength(password)
+        if password_errors:
+            errors.append("SUPERUSER_PASSWORD: " + "; ".join(password_errors))
+
+    if len(settings.secret_key or "") < 32 or settings.secret_key in {
+        "test-secret-key-change-me",
+        "change-me",
+    }:
+        errors.append("SECRET_KEY debe ser un secreto largo y distinto de los valores de prueba")
+
+    if not settings.base_url.startswith("https://"):
+        errors.append("BASE_URL debe usar HTTPS en producción")
+
+    if not settings.cors_origins or any(
+        "localhost" in origin or "127.0.0.1" in origin for origin in settings.cors_origins
+    ):
+        errors.append("CORS_ORIGINS debe contener solo orígenes de producción")
+
+    if not settings.allowed_hosts or any(
+        host in {"localhost", "127.0.0.1", "*"} for host in settings.allowed_hosts
+    ):
+        errors.append("ALLOWED_HOSTS debe contener solo hosts de producción")
+
+    if errors:
+        raise RuntimeError("Configuración de producción inválida:\n- " + "\n- ".join(errors))
+
+
+async def _validate_database_rls_role() -> None:
+    """RLS no protege si la app conecta como superusuario o BYPASSRLS."""
+    if get_settings().environment != "production":
+        return
+    if engine.dialect.name != "postgresql":
+        return
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT rolsuper, rolbypassrls FROM pg_roles "
+                    "WHERE rolname = current_user"
+                )
+            )
+        ).first()
+    if row and (row[0] or row[1]):
+        raise RuntimeError(
+            "El rol de base de datos de la aplicación es superusuario o tiene "
+            "BYPASSRLS; RLS no se aplicaría. Usa un rol NOSUPERUSER NOBYPASSRLS "
+            "para la API y los workers, y otro rol propietario para migraciones."
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    _validate_production_settings()
     await create_database_if_not_exists()
+    await _validate_database_rls_role()
     if get_settings().auto_create_tables:
         # Solo para entornos de desarrollo/pruebas. En producción el esquema
         # se gestiona con Alembic (`alembic upgrade head`).
@@ -208,6 +275,17 @@ app.state.limiter = limiter
 app.add_exception_handler(429, _rate_limit_exceeded_handler)
 
 
+@app.exception_handler(TenantContextRequired)
+async def tenant_context_required_handler(request: Request, exc: TenantContextRequired) -> JSONResponse:
+    logger.warning(
+        "Contexto de organización no resuelto — %s %s", request.method, request.url.path
+    )
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Organización no encontrada"},
+    )
+
+
 @app.exception_handler(IntegrityError)
 async def integrity_error_handler(_request: Request, exc: IntegrityError) -> JSONResponse:
     detail = str(exc.orig) if exc.orig else "Violación de restricción única"
@@ -226,8 +304,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
 
@@ -237,7 +315,8 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "0"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if settings.environment == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Cache-Control"] = "no-cache, private"
     return response
 
@@ -247,6 +326,44 @@ _AUTH_PATHS = (
     "/api/v1/auth/refresh",
     "/api/v1/auth/logout",
 )
+
+_CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+_CSRF_EXEMPT_PATHS = {
+    "/api/v1/auth/token",
+    "/api/v1/auth/register",
+    "/api/v1/auth/refresh",
+    # Logout se permite sin CSRF para no dejar sesiones atrapadas si la cookie
+    # de CSRF falta; el impacto de un logout forzado es bajo.
+    "/api/v1/auth/logout",
+    "/api/v1/payments/webhook",
+    "/api/v1/monitoring/logs",
+}
+
+
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    """Protege peticiones de escritura autenticadas por cookie.
+
+    Usa double-submit: la cookie csrf_token debe coincidir con la cabecera
+    X-CSRF-Token. Los clientes con Bearer no necesitan CSRF.
+    """
+    if request.method.upper() in _CSRF_SAFE_METHODS:
+        return await call_next(request)
+    if request.url.path in _CSRF_EXEMPT_PATHS:
+        return await call_next(request)
+    if request.headers.get("Authorization", "").startswith("Bearer "):
+        return await call_next(request)
+    if not request.cookies.get("access_token"):
+        return await call_next(request)
+
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
+    header_token = request.headers.get("X-CSRF-Token")
+    if not verify_csrf_token(cookie_token, header_token):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "CSRF token inválido o ausente"},
+        )
+    return await call_next(request)
 
 
 async def _tenant_is_active(tenant_id: int) -> bool:
@@ -328,16 +445,26 @@ async def _resolve_tenant_from_host(request: Request) -> int | None:
 
 @app.middleware("http")
 async def tenant_context_middleware(request: Request, call_next):
-    """Resuelve el tenant de la petición (JWT → subdominio → default)."""
-    from app.core.tenant import make_tenant_token, reset_tenant_context
+    """Resuelve el tenant de la petición (JWT → impersonación → host).
+
+    Si no hay tenant, marca el request como tal. Las rutas públicas usan una
+    dependencia explícita que resuelve el tenant por defecto; las rutas de
+    tenant fallan cerradas en la primera consulta.
+    """
+    from app.core.tenant import (
+        make_missing_tenant_token,
+        make_tenant_token,
+        reset_tenant_context,
+    )
 
     tenant_id = await _resolve_tenant_from_token(request)
     if tenant_id is None:
         tenant_id = await _resolve_tenant_from_host(request)
-    if tenant_id is None:
-        # Sin contexto: get_db asignará el tenant por defecto.
-        return await call_next(request)
-    token = make_tenant_token(tenant_id)
+    token = (
+        make_missing_tenant_token()
+        if tenant_id is None
+        else make_tenant_token(tenant_id)
+    )
     try:
         return await call_next(request)
     finally:

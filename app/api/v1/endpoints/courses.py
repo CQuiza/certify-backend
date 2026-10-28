@@ -13,7 +13,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user, get_optional_user
-from app.core.database import get_db
+from app.core.database import get_db, get_db_public
 from app.core.settings import get_settings
 from app.models.course import Course
 from app.models.enums import UserRole
@@ -46,7 +46,7 @@ def _assert_can_manage_course(current: User, course: Course) -> None:
 
 @router.get("")
 async def list_courses(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
     optional_user: Annotated[User | None, Depends(get_optional_user)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=10000)] = 5000,
@@ -64,7 +64,7 @@ async def list_courses(
 @router.get("/{course_id}", response_model=CourseRead)
 async def get_course(
     course_id: int,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
     optional_user: Annotated[User | None, Depends(get_optional_user)],
 ) -> object:
     need_enrollment = optional_user is not None and is_student(optional_user)
@@ -237,7 +237,7 @@ async def delete_course_image(
 @router.get("/{course_id}/image")
 async def get_course_image(
     course_id: int,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
 ) -> Response:
     """Sirve la imagen del curso (pública, para el catálogo)."""
     c = await course_repository.get_by_id(db, course_id)

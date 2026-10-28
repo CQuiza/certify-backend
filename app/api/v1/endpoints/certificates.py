@@ -11,7 +11,7 @@ from minio.error import S3Error
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
-from app.core.database import get_db
+from app.core.database import get_db, get_db_public
 from app.core.rate_limit import limiter
 from app.core.settings import get_settings
 from app.models.enums import CertificateStatus, UserRole
@@ -27,8 +27,9 @@ from app.schemas.certificate import (
     CertificateListResponse,
     CertificateRead,
     CertificateRenewRequest,
-    CertificateSearchResult,
     CertificateUpdate,
+    PublicCertificateItem,
+    PublicCertificateSearchResult,
 )
 from app.schemas.pending_certificate import PendingCertificateCreate, PendingCertificateRead
 from app.services.access import is_super_or_admin
@@ -492,35 +493,67 @@ async def delete_certificate(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 
 
-@router.get("/search-by-identity/{identity_number}", response_model=list[CertificateSearchResult])
+@router.get(
+    "/search-by-identity/{identity_number}",
+    response_model=list[PublicCertificateSearchResult],
+)
 @limiter.limit("5/minute")
 async def search_certificates_by_identity(
-    request: Request, identity_number: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> list[dict]:
-    """Público: busca certificados por número de identidad del estudiante."""
+    request: Request,
+    identity_number: str,
+    db: Annotated[AsyncSession, Depends(get_db_public)],
+) -> list[PublicCertificateSearchResult]:
+    """Público: verificación mínima por número de identidad.
+
+    Devuelve solo los datos necesarios para verificar legitimidad: nombre,
+    identidad, curso, estado y vigencia. No expone IDs internos, precios ni
+    metadata de renovación.
+    """
     user = await user_repository.get_by_identity_number(db, identity_number)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se encontraron certificados para esta identidad")
-    from sqlalchemy.orm import selectinload
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se encontraron certificados para esta identidad",
+        )
+
     from sqlalchemy import select
+
     from app.models.certificate import Certificate
+    from app.models.certificate_type import CertificateType
+    from app.models.course import Course
+
     stmt = (
-        select(Certificate)
+        select(Certificate, Course.title, CertificateType.name)
+        .outerjoin(Course, Certificate.course_id == Course.id)
+        .outerjoin(CertificateType, Certificate.certificate_type_id == CertificateType.id)
         .where(
             Certificate.user_id == user.id,
-            Certificate.status.in_([CertificateStatus.active.value, CertificateStatus.expired.value]),
+            Certificate.status.in_(
+                [CertificateStatus.active.value, CertificateStatus.expired.value]
+            ),
         )
         .order_by(Certificate.issued_at.desc())
     )
-    result = await db.execute(stmt)
-    certs = result.scalars().all()
-    if not certs:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se encontraron certificados para esta identidad")
+    rows = (await db.execute(stmt)).all()
+    certificates = [
+        PublicCertificateItem(
+            course_title=course_title or certificate_type_name,
+            status=certificate.status,
+            issued_at=certificate.issued_at,
+            expires_at=certificate.expires_at,
+            pdf_url=certificate.pdf_url,
+        )
+        for certificate, course_title, certificate_type_name in rows
+    ]
+    if not certificates:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se encontraron certificados para esta identidad",
+        )
     return [
-        {
-            "user_name": user.name,
-            "identity_number": user.identity_number,
-            "certificates": certs,
-        }
+        PublicCertificateSearchResult(
+            user_name=user.name,
+            identity_number=user.identity_number,
+            certificates=certificates,
+        )
     ]

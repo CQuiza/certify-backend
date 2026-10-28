@@ -3,7 +3,14 @@
 import pytest
 from sqlalchemy import select
 
-from app.core.tenant import tenant_ctx
+from app.core.database import AsyncSessionLocal
+from app.core.tenant import (
+    TenantContextRequired,
+    make_missing_tenant_token,
+    reset_tenant_context,
+    tenant_ctx,
+)
+from app.models.course import Course
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.repositories.tenant_repository import tenant_repository
@@ -16,6 +23,17 @@ async def _tenant_id(slug: str) -> int:
     async with AsyncSessionLocal() as session:
         t = await tenant_repository.get_by_slug(session, slug)
         return t.id
+
+
+@pytest.mark.asyncio
+async def test_missing_tenant_context_fails_closed():
+    token = make_missing_tenant_token()
+    try:
+        async with AsyncSessionLocal() as session:
+            with pytest.raises(TenantContextRequired):
+                await session.execute(select(Course))
+    finally:
+        reset_tenant_context(token)
 
 
 @pytest.mark.asyncio

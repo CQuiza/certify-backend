@@ -19,7 +19,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
-from app.core.database import get_db
+from app.core.database import get_db, get_db_public
 from app.core.rate_limit import limiter
 from app.core.settings import get_settings
 from app.models.enums import EmailTemplateKind
@@ -88,7 +88,7 @@ async def get_branding(
 
 @router.get("/public", response_model=PublicBrandingRead)
 async def get_public_branding(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
 ) -> dict:
     """Datos públicos de la organización (nombre y contactos) para páginas públicas."""
     return await platform_settings_service.get_public_branding(db)
@@ -96,7 +96,7 @@ async def get_public_branding(
 
 @router.get("/public/logo")
 async def get_public_logo(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
 ) -> Response:
     """Sirve el logo del tenant (público) para páginas de tenant (login, register, catálogo, búsqueda)."""
     settings = get_settings()

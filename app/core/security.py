@@ -72,6 +72,22 @@ def refresh_token_expires_at() -> datetime:
     return datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_DAYS)
 
 
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_HEADER_NAME = "X-CSRF-Token"
+
+
+def generate_csrf_token() -> str:
+    """Token opaco para el patrón double-submit de CSRF."""
+    return secrets.token_urlsafe(32)
+
+
+def verify_csrf_token(cookie_token: str | None, header_token: str | None) -> bool:
+    """Compara el token de la cookie con el de la cabecera en tiempo constante."""
+    if not cookie_token or not header_token:
+        return False
+    return secrets.compare_digest(cookie_token, header_token)
+
+
 SPECIAL_CHARS = "!@#$%^&*()-_=+"
 
 

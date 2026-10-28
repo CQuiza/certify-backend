@@ -102,7 +102,17 @@ class CertificateListResponse(BaseModel):
     total: int
 
 
-class CertificateSearchResult(BaseModel):
+class PublicCertificateItem(BaseModel):
+    """Datos mínimos para verificación pública. Sin IDs internos ni precios."""
+
+    course_title: str | None = None
+    status: CertificateStatus
+    issued_at: datetime
+    expires_at: datetime | None = None
+    pdf_url: str | None = None
+
+
+class PublicCertificateSearchResult(BaseModel):
     user_name: str | None = None
     identity_number: str | None = None
-    certificates: list[CertificateRead]
+    certificates: list[PublicCertificateItem]

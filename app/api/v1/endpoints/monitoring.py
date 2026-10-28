@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user, get_optional_user
-from app.core.database import get_db, get_db_unscoped
+from app.core.database import get_db_public, get_db_unscoped
 from app.core.rate_limit import limiter
 from app.models.user import User
 from app.repositories.system_log_repository import system_log_repository
@@ -43,7 +43,7 @@ async def list_system_logs(
 async def create_system_log(
     request: Request,
     body: SystemLogCreate,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_public)],
     current: Annotated[User | None, Depends(get_optional_user)],
 ) -> SystemLogRead:
     """Registra un log/error reportado por el cliente (frontend)."""
