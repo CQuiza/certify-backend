@@ -25,6 +25,7 @@ from app.schemas.user import (
     UserWithCertificatesRead,
 )
 from app.services.access import is_super_or_admin
+from app.services import refresh_session_service, security_audit_service
 from app.services.certificate_lifecycle import certificate_lifecycle
 from app.services.user_service import user_service
 from app.core.security import get_password_hash, validate_password_strength, verify_password
@@ -84,6 +85,7 @@ async def get_user(
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
     body: UserCreate,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
     background_tasks: BackgroundTasks,
@@ -95,6 +97,17 @@ async def create_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo un superusuario puede crear otro superusuario")
     try:
         u = await user_service.create_user(db, body, background_tasks=background_tasks, requesting_role=current.role)
+        if body.role.value in {"superuser", "admin"}:
+            await security_audit_service.record(
+                db,
+                actor=current,
+                action="privileged_user_created",
+                target_tenant_id=u.tenant_id,
+                target_type="user",
+                target_id=u.id,
+                after={"email": u.email, "role": u.role},
+                request=request,
+            )
         logger.info("Usuario creado vía API — id=%s, email=%s, by=%s", u.id, u.email, current.email)
         return u
     except ValueError as e:
@@ -106,6 +119,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     body: UserUpdate,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
 ) -> User:
@@ -121,10 +135,38 @@ async def update_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
     if u.role == UserRole.superuser.value and current.role != UserRole.superuser.value:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo un superusuario puede modificar a otro superusuario")
+    previous_role = u.role
+    previous_email = u.email
     updated = await user_service.update_user(db, u, body, requesting_role=current.role)
 
     certificates_regenerated = 0
     changed = set(body.model_dump(exclude_unset=True))
+    if "role" in changed and previous_role != updated.role:
+        await security_audit_service.record(
+            db,
+            actor=current,
+            action="user_role_changed",
+            target_tenant_id=updated.tenant_id,
+            target_type="user",
+            target_id=updated.id,
+            before={"role": previous_role, "email": previous_email},
+            after={"role": updated.role, "email": updated.email},
+            request=request,
+        )
+    if "password" in changed:
+        await refresh_session_service.revoke_all_for_user(
+            db, updated.id, reason="password_changed_by_admin"
+        )
+        await security_audit_service.record(
+            db,
+            actor=current,
+            action="user_password_changed_by_admin",
+            target_tenant_id=updated.tenant_id,
+            target_type="user",
+            target_id=updated.id,
+            after={"email": updated.email},
+            request=request,
+        )
     identity_fields = {"name", "first_last_name", "second_last_name", "identity_number", "identity_type"}
     if changed & identity_fields:
         certificates_regenerated = await certificate_lifecycle.reproduce_active_for_student(
@@ -144,15 +186,21 @@ async def change_password(
     db: Annotated[AsyncSession, Depends(get_db)],
     current: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    if not verify_password(body.current_password, current.password_hash):
-        logger.warning("Cambio password fallido — id=%s: contraseña actual incorrecta", current.id)
+    user = await user_repository.get_by_id(db, current.id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no encontrado")
+    if not verify_password(body.current_password, user.password_hash):
+        logger.warning("Cambio password fallido — id=%s: contraseña actual incorrecta", user.id)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contraseña actual incorrecta")
     pw_errors = validate_password_strength(body.new_password)
     if pw_errors:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="; ".join(pw_errors))
     new_hash = get_password_hash(body.new_password)
-    await user_repository.update(db, current, {"password_hash": new_hash})
-    logger.info("Password cambiada exitosamente — id=%s", current.id)
+    await user_repository.update(db, user, {"password_hash": new_hash})
+    await refresh_session_service.revoke_all_for_user(
+        db, user.id, reason="password_changed"
+    )
+    logger.info("Password cambiada exitosamente — id=%s", user.id)
     return {"message": "Contraseña actualizada correctamente"}
 
 

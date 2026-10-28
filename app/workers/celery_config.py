@@ -8,9 +8,11 @@ from celery import Celery
 from celery.schedules import crontab
 
 from app.core import settings
+from app.core.sentry import init_sentry
 from app.core.settings import Settings, get_settings
 
 settings = get_settings()
+init_sentry("worker")
 # 1. Instanciamos Celery
 celery_app = Celery(
     "main_worker",

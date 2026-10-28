@@ -17,6 +17,9 @@ os.environ["DEBUG"] = "false"
 os.environ["PROJECT_NAME"] = "Certify"
 os.environ["LOKI_URL"] = ""
 os.environ["LOG_FORMAT"] = "text"
+# Evita enviar eventos de prueba a Sentry durante la suite.
+os.environ["SENTRY_DSN"] = ""
+os.environ["TURNSTILE_SECRET_KEY"] = ""
 os.environ["ALLOWED_HOSTS"] = '["*"]'
 os.environ["CORS_ORIGINS"] = '["http://localhost:3000"]'
 os.environ["SUPERUSER_EMAIL"] = "super@example.com"
@@ -38,6 +41,7 @@ from sqlalchemy import select  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 from app.core.database import AsyncSessionLocal, Base, engine  # noqa: E402
+from app.core.rate_limit import limiter  # noqa: E402
 from app.core.security import get_password_hash  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.tenant import Tenant  # noqa: E402
@@ -49,6 +53,12 @@ SYSTEM_BOT_EMAIL = os.environ["SYSTEM_BOT_USER_EMAIL"]
 STUDENT_EMAIL = "student@example.com"
 STUDENT_PASSWORD = "StudentPass1!"
 DEFAULT_SLUG = os.environ["DEFAULT_TENANT_SLUG"]
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """Evita que los límites de un test afecten al siguiente."""
+    limiter.reset()
 
 
 async def _default_tenant_id() -> int:

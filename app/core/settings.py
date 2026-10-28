@@ -108,6 +108,13 @@ class Settings(BaseSettings):
         default="development",
         alias="ENVIRONMENT",
     )
+    sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
+    sentry_environment: str = Field(default="", alias="SENTRY_ENVIRONMENT")
+    sentry_release: str = Field(default="", alias="SENTRY_RELEASE")
+    sentry_traces_sample_rate: float = Field(
+        default=0.1, alias="SENTRY_TRACES_SAMPLE_RATE"
+    )
+    turnstile_secret_key: str = Field(default="", alias="TURNSTILE_SECRET_KEY")
     debug: bool = Field(default=False, alias="DEBUG")
     auto_create_tables: bool = Field(default=False, alias="AUTO_CREATE_TABLES")
 
@@ -158,6 +165,8 @@ class Settings(BaseSettings):
     # Multitenancy
     root_domain: str = Field(default="", alias="ROOT_DOMAIN")
     default_tenant_slug: str = Field(default="default", alias="DEFAULT_TENANT_SLUG")
+    # Rol de base de datos de la aplicación; se usa en migraciones nuevas para grants.
+    app_db_role: str = Field(default="", alias="APP_DB_ROLE")
 
     # Mercado Pago (compra de cursos)
     mercadopago_access_token: str = Field(default="", alias="MERCADOPAGO_ACCESS_TOKEN")

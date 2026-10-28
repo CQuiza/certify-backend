@@ -15,6 +15,9 @@ def _settings(**overrides):
         "base_url": "https://app.example.com",
         "cors_origins": ["https://app.example.com"],
         "allowed_hosts": ["app.example.com"],
+        "payments_enabled": False,
+        "mercadopago_webhook_secret": "",
+        "turnstile_secret_key": "turnstile-secret",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -42,3 +45,13 @@ def test_production_rejects_localhost_cors_and_hosts(monkeypatch):
 def test_production_accepts_complete_config(monkeypatch):
     monkeypatch.setattr(main, "get_settings", lambda: _settings())
     main._validate_production_settings()
+
+
+def test_production_rejects_missing_turnstile_secret(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: _settings(turnstile_secret_key=""),
+    )
+    with pytest.raises(RuntimeError, match="TURNSTILE_SECRET_KEY"):
+        main._validate_production_settings()

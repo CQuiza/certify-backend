@@ -29,7 +29,10 @@ from app.models.module_assessment import ModuleAssessment
 from app.models.pending_certificate import PendingCertificate
 from app.models.platform_settings import PlatformSettings
 from app.models.payment import CourseOrder, CourseOrderItem
+from app.models.payment_webhook_event import PaymentWebhookEvent
 from app.models.progress import UserProgress
+from app.models.refresh_session import RefreshSession
+from app.models.security_audit import SecurityAudit
 from app.models.system_log import SystemLog
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -62,8 +65,11 @@ __all__ = [
     "TaskSubmission",
     "Module",
     "ModuleAssessment",
+    "PaymentWebhookEvent",
     "PendingCertificate",
     "PlatformSettings",
+    "RefreshSession",
+    "SecurityAudit",
     "SystemLog",
     "Tenant",
     "User",

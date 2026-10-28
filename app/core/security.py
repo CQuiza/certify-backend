@@ -74,6 +74,7 @@ def refresh_token_expires_at() -> datetime:
 
 CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "X-CSRF-Token"
+REFRESH_COOKIE_NAME = "refresh_token"
 
 
 def generate_csrf_token() -> str:

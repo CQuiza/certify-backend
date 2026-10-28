@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy import String, cast, func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import UserRole
@@ -25,6 +25,28 @@ class UserRepository:
     async def get_by_phone_number(self, db: AsyncSession, phone_number: str) -> User | None:
         r = await db.execute(select(User).where(User.phone_number == phone_number))
         return r.scalar_one_or_none()
+
+    async def exists_by_registration_identifiers(
+        self,
+        db: AsyncSession,
+        *,
+        email: str,
+        identity_number: str,
+        phone_number: str,
+    ) -> bool:
+        """Comprueba los tres identificadores en una sola consulta."""
+        r = await db.execute(
+            select(User.id)
+            .where(
+                or_(
+                    User.email == email,
+                    User.identity_number == identity_number,
+                    User.phone_number == phone_number,
+                )
+            )
+            .limit(1)
+        )
+        return r.scalar_one_or_none() is not None
 
     def _apply_filters(self, q, *, role, exclude_superuser, search):
         if role is not None:

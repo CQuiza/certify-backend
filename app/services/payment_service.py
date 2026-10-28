@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ from app.core.database import set_rls_context
 from app.core.settings import get_settings
 from app.core.tenant import tenant_ctx, unscoped_ctx
 from app.models.payment import CourseOrder
+from app.models.payment_webhook_event import PaymentWebhookEvent
 
 logger = logging.getLogger(__name__)
 
@@ -221,19 +223,23 @@ async def reconcile_order(db: AsyncSession, order: CourseOrder) -> CourseOrder:
     return order
 
 
-def verify_webhook_signature(request) -> bool:
-    """Verifica x-signature (MP v2: ts, v1). Devuelve True si no hay secreto (modo dev)."""
+def verify_webhook_signature(request, data_id: str | None = None) -> bool:
+    """Verifica x-signature (MP v2: ts, v1).
+
+    Sin secreto solo se acepta fuera de producción. En producción el arranque
+    exige MERCADOPAGO_WEBHOOK_SECRET.
+    """
     settings = get_settings()
     secret = settings.mercadopago_webhook_secret
     if not secret:
-        return True
+        return settings.environment != "production"
 
     x_signature = request.headers.get("x-signature", "")
     request_id = request.headers.get("x-request-id", "")
-    data_id = request.query_params.get("data.id") or request.query_params.get("id")
+    data_id = data_id or request.query_params.get("data.id") or request.query_params.get("id")
 
     params: dict[str, str] = {}
-    for part in x_signature.replace(" ", "").split("&"):
+    for part in x_signature.replace(" ", "").replace(",", "&").split("&"):
         if "=" in part:
             k, v = part.split("=", 1)
             params[k] = v
@@ -252,7 +258,8 @@ async def process_payment(db: AsyncSession, payment: dict) -> CourseOrder | None
     """Marca el pedido según el estado real y materializa la compra si fue aprobado."""
     external_reference = str(payment.get("external_reference") or "")
     status = str(payment.get("status") or "").lower()
-    if not external_reference:
+    payment_id = str(payment.get("id") or "")
+    if not external_reference or not payment_id:
         return None
 
     from sqlalchemy import select
@@ -268,15 +275,36 @@ async def process_payment(db: AsyncSession, payment: dict) -> CourseOrder | None
     # procesa dentro del tenant del propio pedido.
     async with unscoped_ctx():
         result = await db.execute(
-            select(CourseOrder).where(CourseOrder.order_no == external_reference)
+            select(CourseOrder)
+            .where(CourseOrder.order_no == external_reference)
+            .with_for_update()
         )
         order = result.scalar_one_or_none()
-    if order is None:
-        logger.warning("Webhook: pedido %s no encontrado", external_reference)
-        return None
+        if order is None:
+            logger.warning("Webhook: pedido %s no encontrado", external_reference)
+            return None
 
-    if order.status == "approved" and status == "approved":
-        return order  # ya procesado (idempotente)
+        if status == "approved":
+            existing = (
+                await db.execute(
+                    select(PaymentWebhookEvent).where(
+                        PaymentWebhookEvent.payment_id == payment_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return order
+            if order.status == "approved":
+                db.add(
+                    PaymentWebhookEvent(
+                        payment_id=payment_id,
+                        order_id=order.id,
+                        status="approved",
+                        processed_at=datetime.now(UTC),
+                    )
+                )
+                await db.flush()
+                return order
 
     async with tenant_ctx(order.tenant_id):
         await set_rls_context(db, order.tenant_id)
@@ -382,12 +410,20 @@ async def process_payment(db: AsyncSession, payment: dict) -> CourseOrder | None
                     tenant_id=order.tenant_id,
                 )
             logger.info("Pedido aprobado — order=%s", order.order_no)
+            db.add(
+                PaymentWebhookEvent(
+                    payment_id=payment_id,
+                    order_id=order.id,
+                    status="approved",
+                    processed_at=datetime.now(UTC),
+                )
+            )
         elif status in ("cancelled", "rejected"):
             order.status = "cancelled" if status == "cancelled" else "failed"
             logger.info("Pedido %s — %s", order.order_no, order.status)
         else:
             order.status = "pending"
-            order.external_id = str(payment.get("id"))
+            order.external_id = payment_id
         await db.flush()
         await db.refresh(order)
         return order

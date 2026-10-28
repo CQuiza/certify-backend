@@ -16,6 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.core.rate_limit import limiter
 from app.core.security import CSRF_COOKIE_NAME, verify_csrf_token
+from app.core.sentry import init_sentry
 from app.core.tenant import TenantContextRequired
 
 from app.core.database import AsyncSessionLocal, Base, engine
@@ -39,6 +40,7 @@ from app.models import (  # noqa: F401 — registra metadatos
 from app.models.system_log import SystemLog  # noqa: F401 — registra metadatos
 
 configure_logging()
+init_sentry("api")
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +221,16 @@ def _validate_production_settings() -> None:
     ):
         errors.append("ALLOWED_HOSTS debe contener solo hosts de producción")
 
+    if settings.payments_enabled and not settings.mercadopago_webhook_secret:
+        errors.append(
+            "MERCADOPAGO_WEBHOOK_SECRET es obligatorio cuando PAYMENTS_ENABLED=true"
+        )
+
+    if not settings.turnstile_secret_key:
+        errors.append(
+            "TURNSTILE_SECRET_KEY es obligatorio para el registro público"
+        )
+
     if errors:
         raise RuntimeError("Configuración de producción inválida:\n- " + "\n- ".join(errors))
 
@@ -336,7 +348,6 @@ _CSRF_EXEMPT_PATHS = {
     # de CSRF falta; el impacto de un logout forzado es bajo.
     "/api/v1/auth/logout",
     "/api/v1/payments/webhook",
-    "/api/v1/monitoring/logs",
 }
 
 

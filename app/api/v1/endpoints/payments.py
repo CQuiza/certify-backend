@@ -7,11 +7,13 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db, get_db_unscoped
+from app.core.rate_limit import limiter
 from app.core.settings import get_settings
 from app.models.certificate import Certificate
 from app.models.course import Course
@@ -32,6 +34,7 @@ from app.services.payment_service import (
     process_payment,
     reconcile_order,
     resolve_payment_from_notification,
+    verify_webhook_signature,
 )
 
 logger = logging.getLogger(__name__)
@@ -243,6 +246,7 @@ async def get_order(
 
 
 @router.post("/webhook")
+@limiter.limit("60/minute")
 async def payment_webhook(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db_unscoped)],
@@ -281,6 +285,13 @@ async def payment_webhook(
     if not resource_id:
         return {"status": "ignored"}
 
+    if not verify_webhook_signature(request, str(resource_id)):
+        logger.warning("Webhook: firma inválida — id=%s", resource_id)
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"status": "invalid_signature"},
+        )
+
     try:
         payment = await resolve_payment_from_notification(str(resource_id), topic=topic, action=action)
     except Exception:
@@ -293,7 +304,10 @@ async def payment_webhook(
     try:
         await process_payment(db, payment)
         await db.commit()
-    except Exception:
+    except Exception as exc:
         logger.exception("Webhook: error procesando payment=%s", payment.get("id"))
-        return {"status": "error"}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error procesando el pago",
+        ) from exc
     return {"status": "ok"}
