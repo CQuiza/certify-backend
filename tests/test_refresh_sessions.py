@@ -86,6 +86,7 @@ async def test_password_change_revokes_all_sessions():
                 "identity_type": "CC",
                 "identity_number": f"REF-{uuid.uuid4().hex[:8]}",
                 "phone_number": f"+57{uuid.uuid4().int % 10**10:010d}",
+                "birth_date": "1990-01-01",
             },
         )
         assert register.status_code == 201, register.text

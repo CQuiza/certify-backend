@@ -102,6 +102,7 @@ class UserService:
             identity_type=data.identity_type.value,
             identity_number=data.identity_number,
             phone_number=data.phone_number,
+            birth_date=data.birth_date,
             is_active=data.is_active,
         )
         if background_tasks:

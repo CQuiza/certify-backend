@@ -1,6 +1,7 @@
 """Repositorio de usuarios."""
 
 from collections.abc import Sequence
+from datetime import date
 
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,6 +104,7 @@ class UserRepository:
         identity_type: str,
         identity_number: str,
         phone_number: str,
+        birth_date: date | None = None,
         is_active: bool = True,
         tenant_id: int | None = None,
     ) -> User:
@@ -122,6 +124,7 @@ class UserRepository:
             identity_type=identity_type,
             identity_number=identity_number,
             phone_number=phone_number,
+            birth_date=birth_date,
             is_active=is_active,
             tenant_id=tenant_id,
         )
@@ -141,6 +144,7 @@ class UserRepository:
             "identity_type",
             "identity_number",
             "phone_number",
+            "birth_date",
             "is_active",
         }
         for k, v in fields.items():

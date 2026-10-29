@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Integer,
     String,
@@ -52,6 +53,7 @@ class User(TenantScoped, Base):
     identity_type: Mapped[str] = mapped_column(String(50), nullable=False)
     identity_number: Mapped[str] = mapped_column(String(50), nullable=False)
     phone_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

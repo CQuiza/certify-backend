@@ -1,7 +1,7 @@
 """OAuth2 password flow (token + refresh) y registro público de estudiantes."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -20,6 +20,7 @@ from app.core.security import (
     create_access_token,
     generate_csrf_token,
     get_password_hash,
+    is_adult,
     validate_password_strength,
 )
 from app.core.settings import get_settings
@@ -115,6 +116,7 @@ class RegisterRequest(BaseModel):
     identity_type: str = "CC"
     identity_number: str = Field(..., max_length=50)
     phone_number: str = Field(..., max_length=20)
+    birth_date: date
     turnstile_token: str | None = Field(default=None, max_length=2048)
 
 
@@ -133,6 +135,12 @@ async def register_student(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=REGISTRATION_FAILED_DETAIL,
+        )
+
+    if not is_adult(body.birth_date):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes ser mayor de 18 años para registrarte.",
         )
 
     email = str(body.email).strip().lower()
@@ -166,6 +174,7 @@ async def register_student(
             identity_type=body.identity_type,
             identity_number=identity_number,
             phone_number=phone_number,
+            birth_date=body.birth_date,
         )
     except IntegrityError as exc:
         logger.warning("Registro rechazado: conflicto de unicidad")

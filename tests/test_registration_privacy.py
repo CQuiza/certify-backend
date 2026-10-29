@@ -1,6 +1,7 @@
 """PRIV-02: el registro no debe revelar qué identificador existe."""
 
 import uuid
+from datetime import date
 
 import pytest
 
@@ -19,6 +20,7 @@ def _payload() -> dict[str, str]:
         "identity_type": "CC",
         "identity_number": f"PRIV-{suffix}",
         "phone_number": f"+57{uuid.uuid4().int % 10**10:010d}",
+        "birth_date": "1990-01-01",
     }
 
 
@@ -56,3 +58,24 @@ async def test_registration_is_rate_limited(client):
 
     assert statuses[:3] == [201, 201, 201]
     assert statuses[3] == 429
+
+
+@pytest.mark.asyncio
+async def test_registration_rejects_underage_user(client):
+    today = date.today()
+    payload = _payload() | {"birth_date": date(today.year - 17, 1, 1).isoformat()}
+
+    response = await client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Debes ser mayor de 18 años para registrarte."
+
+
+@pytest.mark.asyncio
+async def test_registration_accepts_adult_user(client):
+    today = date.today()
+    payload = _payload() | {"birth_date": date(today.year - 18, 1, 1).isoformat()}
+
+    response = await client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 201, response.text

@@ -3,7 +3,7 @@
 import hashlib
 import secrets
 import string
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -126,3 +126,18 @@ def validate_password_strength(password: str) -> list[str]:
     if not any(c in SPECIAL_CHARS for c in password):
         errors.append(f"Debe contener al menos un carácter especial ({SPECIAL_CHARS})")
     return errors
+
+
+def calculate_age(birth_date: date, today: date | None = None) -> int:
+    """Calcula la edad en años a partir de la fecha de nacimiento."""
+    reference = today or date.today()
+    return (
+        reference.year
+        - birth_date.year
+        - ((reference.month, reference.day) < (birth_date.month, birth_date.day))
+    )
+
+
+def is_adult(birth_date: date, *, minimum_age: int = 18) -> bool:
+    """True si la persona tiene al menos la edad mínima."""
+    return calculate_age(birth_date) >= minimum_age

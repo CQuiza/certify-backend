@@ -1,6 +1,6 @@
 """Esquemas de usuario."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -17,6 +17,7 @@ class UserBase(BaseModel):
     identity_type: IdentityType
     identity_number: str = Field(..., max_length=50)
     phone_number: str = Field(..., max_length=20)
+    birth_date: date | None = None
     is_active: bool = True
 
 
@@ -36,6 +37,7 @@ class UserUpdate(BaseModel):
     identity_type: IdentityType | None = None
     identity_number: str | None = Field(default=None, max_length=50)
     phone_number: str | None = Field(default=None, max_length=20)
+    birth_date: date | None = None
     is_active: bool | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -56,6 +58,7 @@ class UserRead(BaseModel):
     identity_type: IdentityType
     identity_number: str
     phone_number: str
+    birth_date: date | None = None
     created_at: datetime
     updated_at: datetime
     is_active: bool
