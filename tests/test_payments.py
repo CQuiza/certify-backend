@@ -35,6 +35,7 @@ async def _register_student(client, email, identity, phone, name="Est", last="Pr
             "identity_number": identity,
             "phone_number": phone,
             "birth_date": "1990-01-01",
+            "accepted_terms": True,
         },
     )
     assert resp.status_code == 201, resp.text
@@ -54,6 +55,7 @@ async def test_register_student_and_login(client):
         "identity_number": "999000111",
         "phone_number": "+570000000099",
         "birth_date": "1990-01-01",
+        "accepted_terms": True,
     }
     resp = await client.post("/api/v1/auth/register", json=payload)
     assert resp.status_code == 201

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db_public, get_db_unscoped, set_rls_context
+from app.core.legal import EULA_DOCUMENT, EULA_VERSION
 from app.core.rate_limit import limiter
 from app.core.security import (
     CSRF_COOKIE_NAME,
@@ -27,9 +28,10 @@ from app.core.settings import get_settings
 from app.core.tenant import make_tenant_token, reset_tenant_context
 from app.models.user import User
 from app.repositories.user_repository import user_repository
+from app.schemas.legal import ConsentAccepted
 from app.schemas.token import Token
-from app.schemas.user import UserRead
-from app.services import refresh_session_service, turnstile_service
+from app.schemas.user import MeResponse
+from app.services import consent_service, refresh_session_service, turnstile_service
 from app.services.user_service import user_service
 
 router = APIRouter(tags=["auth"])
@@ -117,6 +119,7 @@ class RegisterRequest(BaseModel):
     identity_number: str = Field(..., max_length=50)
     phone_number: str = Field(..., max_length=20)
     birth_date: date
+    accepted_terms: bool = Field(default=False)
     turnstile_token: str | None = Field(default=None, max_length=2048)
 
 
@@ -141,6 +144,15 @@ async def register_student(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Debes ser mayor de 18 años para registrarte.",
+        )
+
+    if not body.accepted_terms:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Debes aceptar el Acuerdo de Usuario Final y Política de "
+                "Privacidad para registrarte."
+            ),
         )
 
     email = str(body.email).strip().lower()
@@ -182,6 +194,8 @@ async def register_student(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=REGISTRATION_FAILED_DETAIL,
         ) from exc
+
+    await consent_service.record_eula(db, user, request)
 
     access_token = create_access_token(
         subject=user.id, extra_claims={"tenant_id": user.tenant_id, "role": user.role}
@@ -337,6 +351,38 @@ async def logout(
     return resp
 
 
-@router.get("/auth/me", response_model=UserRead, summary="Usuario autenticado")
-async def me(current: Annotated[User, Depends(get_current_user)]) -> User:
-    return current
+@router.get("/auth/me", response_model=MeResponse, summary="Usuario autenticado")
+async def me(
+    request: Request,
+    current: Annotated[User, Depends(get_current_user)],
+) -> MeResponse:
+    payload = MeResponse.model_validate(current)
+    payload.eula_pending = bool(getattr(request.state, "eula_pending", False))
+    payload.eula_version = EULA_VERSION
+    payload.eula_accepted_at = getattr(request.state, "eula_accepted_at", None)
+    return payload
+
+
+@router.post(
+    "/auth/accept-eula",
+    response_model=ConsentAccepted,
+    summary="Aceptar el acuerdo de estudiantes",
+)
+async def accept_eula(
+    request: Request,
+    current: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
+) -> ConsentAccepted:
+    if current.role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este acuerdo aplica únicamente a estudiantes.",
+        )
+
+    consent = await consent_service.record_eula(db, current, request)
+    return ConsentAccepted(
+        accepted=True,
+        document=EULA_DOCUMENT,
+        version=EULA_VERSION,
+        accepted_at=consent.accepted_at,
+    )

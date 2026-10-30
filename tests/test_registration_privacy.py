@@ -21,6 +21,7 @@ def _payload() -> dict[str, str]:
         "identity_number": f"PRIV-{suffix}",
         "phone_number": f"+57{uuid.uuid4().int % 10**10:010d}",
         "birth_date": "1990-01-01",
+        "accepted_terms": True,
     }
 
 

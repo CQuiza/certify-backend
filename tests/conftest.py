@@ -218,26 +218,30 @@ async def tenant_b_admin_token(tenant_b_credentials) -> str:
 @pytest.fixture(scope="session")
 async def student_token() -> str:
     from app.models.user import User
+    from app.services import consent_service
 
     default_id = await _default_tenant_id()
     async with AsyncSessionLocal() as session:
         existing = await session.execute(select(User).where(User.email == STUDENT_EMAIL))
-        if existing.scalar_one_or_none() is None:
-            session.add(
-                User(
-                    email=STUDENT_EMAIL,
-                    password_hash=get_password_hash(STUDENT_PASSWORD),
-                    name="Estudiante",
-                    first_last_name="Prueba",
-                    role="student",
-                    identity_type="CC",
-                    identity_number="1010101010",
-                    phone_number="+570000000011",
-                    is_active=True,
-                    tenant_id=default_id,
-                )
+        student = existing.scalar_one_or_none()
+        if student is None:
+            student = User(
+                email=STUDENT_EMAIL,
+                password_hash=get_password_hash(STUDENT_PASSWORD),
+                name="Estudiante",
+                first_last_name="Prueba",
+                role="student",
+                identity_type="CC",
+                identity_number="1010101010",
+                phone_number="+570000000011",
+                is_active=True,
+                tenant_id=default_id,
             )
+            session.add(student)
             await session.commit()
+            await session.refresh(student)
+        await consent_service.record_eula(session, student)
+        await session.commit()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://app.testserver") as ac:
         return await _login(ac, STUDENT_EMAIL, STUDENT_PASSWORD)
 

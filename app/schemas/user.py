@@ -73,6 +73,14 @@ class UserUpdateResponse(UserRead):
     certificates_regenerated: int = 0
 
 
+class MeResponse(UserRead):
+    """Usuario autenticado con el estado del consentimiento legal."""
+
+    eula_pending: bool = False
+    eula_version: str | None = None
+    eula_accepted_at: datetime | None = None
+
+
 
 
 class UserWithCertificatesRead(UserRead):

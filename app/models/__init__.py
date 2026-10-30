@@ -38,6 +38,7 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_assessment_attempt import UserAssessmentAnswer, UserAssessmentAttempt
 from app.models.user_audit import UserAudit
+from app.models.user_consent import UserConsent
 from app.models.worker_audit import WorkerAudit
 
 __all__ = [
@@ -76,6 +77,7 @@ __all__ = [
     "UserAssessmentAnswer",
     "UserAssessmentAttempt",
     "UserAudit",
+    "UserConsent",
     "UserProgress",
     "UserRole",
     "ValidityUnit",
