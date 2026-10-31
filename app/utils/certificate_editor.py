@@ -262,7 +262,7 @@ class CertificateEditor:
 
         # Nombre estudiante
         c.setFont(f_treb, 32.5)
-        c.setFillColor(blue)
+        c.setFillColor(navy)
         c.drawCentredString(
             cx, _LAYOUT["student_name_y"], (data.student_full_name).upper()
         )

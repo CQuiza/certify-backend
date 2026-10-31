@@ -1,6 +1,8 @@
 """Lección."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.core.url_validation import validate_optional_http_url
 
 
 class LessonCreate(BaseModel):
@@ -12,6 +14,11 @@ class LessonCreate(BaseModel):
     file_content_url: str | None = None
     order_index: int
 
+    @field_validator("image_content_url", "video_content_url", "file_content_url")
+    @classmethod
+    def _validate_urls(cls, value: str | None) -> str | None:
+        return validate_optional_http_url(value)
+
 
 class LessonUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=255)
@@ -22,6 +29,11 @@ class LessonUpdate(BaseModel):
     order_index: int | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("image_content_url", "video_content_url", "file_content_url")
+    @classmethod
+    def _validate_urls(cls, value: str | None) -> str | None:
+        return validate_optional_http_url(value)
 
 
 class LessonRead(BaseModel):
