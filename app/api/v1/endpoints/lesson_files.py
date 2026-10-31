@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.http_headers import content_disposition
 from app.core.settings import get_settings
 from app.models.enums import UserRole
 from app.models.lesson import Lesson
@@ -23,7 +24,7 @@ from app.utils.minio_client import get_minio_client
 
 router = APIRouter(prefix="/lessons", tags=["lesson_files"])
 
-_ALLOWED_EXTENSIONS = {"jpg", "png", "pdf", "docx", "pptx", "xlsx"}
+_ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "pdf", "docx", "pptx", "xlsx"}
 
 
 def _validate_file_extension(filename: str) -> None:
@@ -251,6 +252,6 @@ async def download_lesson_file(
         content=data,
         media_type=media_type,
         headers={
-            "Content-Disposition": f'{disposition}; filename="{filename}"',
+            "Content-Disposition": content_disposition(filename, disposition),
         },
     )

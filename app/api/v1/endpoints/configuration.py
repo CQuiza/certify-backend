@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db, get_db_public
+from app.core.http_headers import content_disposition
 from app.core.rate_limit import limiter
 from app.core.settings import get_settings
 from app.models.enums import EmailTemplateKind
@@ -464,7 +465,7 @@ async def preview_certificate_template(
         content=data,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="{_TEMPLATE_OBJECT_NAME}"',
+            "Content-Disposition": content_disposition(_TEMPLATE_OBJECT_NAME, "inline"),
         },
     )
 
