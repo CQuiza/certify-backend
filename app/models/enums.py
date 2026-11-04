@@ -69,3 +69,21 @@ class EmailTemplateKind(str, Enum):
     credentials = "credentials"
     certificate_issued = "certificate_issued"
     certificate_expired = "certificate_expired"
+
+
+class TenantPlan(str, Enum):
+    """Plan contratado por un tenant (facturación SaaS)."""
+
+    mensual = "mensual"
+    semestral = "semestral"
+    anual = "anual"
+
+
+class TenantBillingStatus(str, Enum):
+    """Estado de cobranza derivado de la cobertura pagada."""
+
+    al_dia = "al_dia"
+    por_vencer = "por_vencer"
+    pendiente = "pendiente"
+    sin_registro = "sin_registro"
+    interno = "interno"

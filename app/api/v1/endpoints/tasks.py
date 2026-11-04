@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.file_types import validate_upload_content
 from app.core.http_headers import content_disposition
 from app.core.settings import get_settings
 from app.models.enums import UserRole
@@ -177,6 +178,13 @@ async def upload_task_file(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"El archivo supera el límite de {settings.task_max_upload_size_mb} MB",
         )
+    try:
+        inferred_mime = validate_upload_content(data, original_filename)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     ext = ""
     if original_filename and "." in original_filename:
         ext = original_filename.rsplit(".", 1)[-1]
@@ -189,7 +197,7 @@ async def upload_task_file(
             client.upload_bytes,
             object_name,
             data,
-            content_type=file.content_type or "application/octet-stream",
+            content_type=inferred_mime,
         )
     except Exception as e:
         raise HTTPException(
@@ -258,5 +266,6 @@ async def download_task_file(
         media_type="application/octet-stream",
         headers={
             "Content-Disposition": content_disposition(filename, "attachment"),
+            "Content-Security-Policy": "frame-ancestors 'none'",
         },
     )

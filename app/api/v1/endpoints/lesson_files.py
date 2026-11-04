@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user
 from app.core.database import get_db
+from app.core.file_types import is_inline_mime, sniff_mime, validate_upload_content
 from app.core.http_headers import content_disposition
 from app.core.settings import get_settings
 from app.models.enums import UserRole
@@ -98,7 +99,8 @@ async def create_lesson_file(
         db,
         lesson_id=lesson_id,
         original_filename=body.original_filename,
-        mime_type=body.mime_type,
+        # El MIME lo fija el upload tras inspeccionar el contenido real.
+        mime_type=None,
         order_index=body.order_index,
     )
 
@@ -162,6 +164,13 @@ async def upload_lesson_file(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"El archivo supera el límite de {settings.lesson_file_max_upload_size_mb} MB",
         )
+    try:
+        inferred_mime = validate_upload_content(data, original_filename)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     ext = ""
     if original_filename and "." in original_filename:
         ext = original_filename.rsplit(".", 1)[-1]
@@ -174,7 +183,7 @@ async def upload_lesson_file(
             client.upload_bytes,
             object_name,
             data,
-            content_type=file.content_type or "application/octet-stream",
+            content_type=inferred_mime,
         )
     except Exception as e:
         raise HTTPException(
@@ -188,7 +197,7 @@ async def upload_lesson_file(
         {
             "file_url": object_name,
             "original_filename": original_filename,
-            "mime_type": file.content_type,
+            "mime_type": inferred_mime,
         },
     )
 
@@ -247,11 +256,15 @@ async def download_lesson_file(
     filename = lesson_file.original_filename or (
         lesson_file.file_url.rsplit("/", 1)[-1] if "/" in lesson_file.file_url else "file"
     )
-    media_type = lesson_file.mime_type or "application/octet-stream"
+    # Re-infiera desde los bytes: ignora cualquier mime_type legado o manipulado.
+    inferred_mime = sniff_mime(data)
+    if disposition == "inline" and not is_inline_mime(inferred_mime):
+        disposition = "attachment"
     return Response(
         content=data,
-        media_type=media_type,
+        media_type=inferred_mime or "application/octet-stream",
         headers={
             "Content-Disposition": content_disposition(filename, disposition),
+            "Content-Security-Policy": "frame-ancestors 'none'",
         },
     )

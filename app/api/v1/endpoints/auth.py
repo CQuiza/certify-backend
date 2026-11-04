@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, Field
@@ -217,7 +217,16 @@ async def login(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db_public)],
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
+    turnstile_token: Annotated[str | None, Header(alias="X-Turnstile-Token")] = None,
 ) -> Token:
+    if not await turnstile_service.verify_token(turnstile_token, "login"):
+        logger.warning("Login rechazado: verificación CAPTCHA fallida")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales incorrectas",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     user: User | None
     try:
         user = await user_service.authenticate(db, form.username, form.password)

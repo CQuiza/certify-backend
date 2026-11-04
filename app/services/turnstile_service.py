@@ -1,4 +1,4 @@
-"""Verificación de Cloudflare Turnstile para el registro público."""
+"""Verificación de Cloudflare Turnstile para formularios públicos."""
 
 from __future__ import annotations
 
@@ -12,12 +12,11 @@ from app.core.settings import get_settings
 logger = logging.getLogger(__name__)
 
 _VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-_EXPECTED_ACTION = "register"
 _TIMEOUT_SECONDS = 5.0
 
 
-async def verify_token(token: str | None) -> bool:
-    """Valida el token de Turnstile.
+async def verify_token(token: str | None, action: str = "register") -> bool:
+    """Valida el token de Turnstile para la acción esperada.
 
     En desarrollo o tests sin secreto se omite la verificación. En producción
     el arranque exige ``TURNSTILE_SECRET_KEY`` y un token válido.
@@ -50,9 +49,12 @@ async def verify_token(token: str | None) -> bool:
         logger.warning("Turnstile: token rechazado — codes=%s", codes)
         return False
 
-    action = payload.get("action")
-    if action is not None and action != _EXPECTED_ACTION:
-        logger.warning("Turnstile: acción inesperada — action=%s", action)
+    if payload.get("action") != action:
+        logger.warning(
+            "Turnstile: acción inesperada — action=%s esperada=%s",
+            payload.get("action"),
+            action,
+        )
         return False
 
     return True

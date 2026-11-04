@@ -228,7 +228,7 @@ def _validate_production_settings() -> None:
 
     if not settings.turnstile_secret_key:
         errors.append(
-            "TURNSTILE_SECRET_KEY es obligatorio para el registro público"
+            "TURNSTILE_SECRET_KEY es obligatorio para registro, login y búsqueda pública"
         )
 
     if errors:
@@ -317,7 +317,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-Turnstile-Token"],
 )
 
 

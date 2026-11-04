@@ -35,6 +35,7 @@ from app.models.refresh_session import RefreshSession
 from app.models.security_audit import SecurityAudit
 from app.models.system_log import SystemLog
 from app.models.tenant import Tenant
+from app.models.tenant_payment import TenantPayment
 from app.models.user import User
 from app.models.user_assessment_attempt import UserAssessmentAnswer, UserAssessmentAttempt
 from app.models.user_audit import UserAudit

@@ -20,7 +20,13 @@ from app.schemas.tenant import (
     TenantResetResult,
     TenantStatusUpdate,
 )
+from app.schemas.tenant_payment import (
+    TenantPaymentCreate,
+    TenantPaymentRead,
+    TenantPaymentUpdate,
+)
 from app.services import refresh_session_service, security_audit_service
+from app.services.tenant_billing_service import tenant_billing_service
 from app.services.tenant_service import tenant_service
 
 logger = logging.getLogger(__name__)
@@ -42,7 +48,13 @@ async def list_tenants(
     current: Annotated[User, Depends(get_current_user)],
 ) -> list:
     _require_superuser(current)
-    return await tenant_service.list_tenants(db)
+    tenants = await tenant_service.list_tenants(db)
+    summaries = await tenant_billing_service.summaries(
+        db, [(t["id"], t["slug"]) for t in tenants]
+    )
+    for tenant in tenants:
+        tenant["billing"] = summaries.get(tenant["id"])
+    return tenants
 
 
 @router.post("", response_model=TenantCreated, status_code=status.HTTP_201_CREATED)
@@ -170,6 +182,128 @@ async def reset_tenant_admin_password(
     return TenantResetResult(
         detail=f"Contraseña reiniciada para {body.admin_email}",
         password=new_password,
+    )
+
+
+def _payment_snapshot(payment) -> dict:
+    """Resumen serializable para la auditoría."""
+    return {
+        "plan": payment.plan,
+        "amount": str(payment.amount),
+        "currency": payment.currency,
+        "period_start": payment.period_start.isoformat(),
+        "period_end": payment.period_end.isoformat(),
+        "paid_at": payment.paid_at.isoformat(),
+        "reference": payment.reference,
+    }
+
+
+@router.get("/{tenant_id}/payments", response_model=list[TenantPaymentRead])
+async def list_tenant_payments(
+    tenant_id: int,
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> list:
+    """Historial de pagos del tenant (solo superuser)."""
+    _require_superuser(current)
+    tenant = await tenant_repository.get_by_id(db, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+    return await tenant_billing_service.list_payments(db, tenant_id)
+
+
+@router.post(
+    "/{tenant_id}/payments",
+    response_model=TenantPaymentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_tenant_payment(
+    tenant_id: int,
+    body: TenantPaymentCreate,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
+    current: Annotated[User, Depends(get_current_user)],
+):
+    """Registra un pago recibido y la cobertura que otorga."""
+    _require_superuser(current)
+    tenant = await tenant_repository.get_by_id(db, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    payment = await tenant_billing_service.create_payment(
+        db, tenant_id=tenant.id, data=body, created_by=current.id
+    )
+    await security_audit_service.record(
+        db,
+        actor=current,
+        action="tenant_payment_created",
+        target_tenant_id=tenant.id,
+        target_type="tenant_payment",
+        target_id=payment.id,
+        after=_payment_snapshot(payment),
+        request=request,
+    )
+    return payment
+
+
+@router.patch("/{tenant_id}/payments/{payment_id}", response_model=TenantPaymentRead)
+async def update_tenant_payment(
+    tenant_id: int,
+    payment_id: int,
+    body: TenantPaymentUpdate,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
+    current: Annotated[User, Depends(get_current_user)],
+):
+    """Corrige un pago; si cambia el plan o el inicio, recalcula la cobertura."""
+    _require_superuser(current)
+    payment = await tenant_billing_service.get_payment(db, tenant_id, payment_id)
+    if payment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Pago no encontrado"
+        )
+    before = _payment_snapshot(payment)
+    payment = await tenant_billing_service.update_payment(db, payment, body)
+    await security_audit_service.record(
+        db,
+        actor=current,
+        action="tenant_payment_updated",
+        target_tenant_id=tenant_id,
+        target_type="tenant_payment",
+        target_id=payment.id,
+        before=before,
+        after=_payment_snapshot(payment),
+        request=request,
+    )
+    return payment
+
+
+@router.delete("/{tenant_id}/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tenant_payment(
+    tenant_id: int,
+    payment_id: int,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db_unscoped)],
+    current: Annotated[User, Depends(get_current_user)],
+) -> None:
+    """Elimina un pago cargado por error (queda auditado)."""
+    _require_superuser(current)
+    payment = await tenant_billing_service.get_payment(db, tenant_id, payment_id)
+    if payment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Pago no encontrado"
+        )
+    before = _payment_snapshot(payment)
+    await tenant_billing_service.delete_payment(db, payment)
+    await security_audit_service.record(
+        db,
+        actor=current,
+        action="tenant_payment_deleted",
+        target_tenant_id=tenant_id,
+        target_type="tenant_payment",
+        target_id=payment_id,
+        before=before,
+        request=request,
     )
 
 

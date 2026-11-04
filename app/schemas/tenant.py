@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.schemas.tenant_payment import TenantBilling
+
 _SLUG_RE = r"^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$"
 
 
@@ -39,6 +41,7 @@ class TenantRead(BaseModel):
     total_users: int = 0
     total_courses: int = 0
     total_certificates: int = 0
+    billing: TenantBilling | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

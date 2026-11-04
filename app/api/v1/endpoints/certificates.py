@@ -5,7 +5,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from minio.error import S3Error
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,7 @@ from app.schemas.certificate import (
     PublicCertificateSearchResult,
 )
 from app.schemas.pending_certificate import PendingCertificateCreate, PendingCertificateRead
+from app.services import turnstile_service
 from app.services.access import is_super_or_admin
 from app.services.certificate_lifecycle import certificate_lifecycle
 from app.utils.minio_client import get_minio_client
@@ -502,6 +503,7 @@ async def search_certificates_by_identity(
     request: Request,
     identity_number: str,
     db: Annotated[AsyncSession, Depends(get_db_public)],
+    turnstile_token: Annotated[str | None, Header(alias="X-Turnstile-Token")] = None,
 ) -> list[PublicCertificateSearchResult]:
     """Público: verificación mínima por número de identidad.
 
@@ -509,6 +511,13 @@ async def search_certificates_by_identity(
     identidad, curso, estado y vigencia. No expone IDs internos, precios ni
     metadata de renovación.
     """
+    if not await turnstile_service.verify_token(turnstile_token, "search"):
+        logger.warning("Búsqueda rechazada: verificación CAPTCHA fallida")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se encontraron certificados para esta identidad",
+        )
+
     user = await user_repository.get_by_identity_number(db, identity_number)
     if not user:
         raise HTTPException(
